@@ -257,7 +257,8 @@ class Optimizer:
                 # Choose feasible decision variables by definition
                 ind_feasible = (self.Xmat_ind | ~Xprev_ind).all(axis=1)
                 # Choose feasible decision variables by start year
-                if unavailable_groups[t].any():
+                # if unavailable_groups[t].any():  TODO Temp Bug fix, figure out solution later
+                if t < len(unavailable_groups) and unavailable_groups[t].any():
                     ind_feasible = ind_feasible & (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
                 # Exclude infeasible decision variable by priority
                 ind_feasible = ind_feasible & ind_priority[i]

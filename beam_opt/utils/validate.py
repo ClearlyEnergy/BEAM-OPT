@@ -8,11 +8,11 @@ import json
 import numpy as np
 import pandas as pd
 
-BASELINE_DF_COLUMNS = ['Annual_Bill', 'Electricity_CO2', 'Gas_CO2', 'Total_CO2', 'Electricity_Consumption',
-                       'Gas_Consumption', 'Electricity_Bill', 'Gas_Bill']
+BASELINE_VALIDATION_COLUMNS = ['Annual_Bill', 'Electricity_CO2', 'Gas_CO2', 'Total_CO2', 'Electricity_Consumption',
+                               'Gas_Consumption', 'Electricity_Bill', 'Gas_Bill']
 
-MEASURE_DF_COLUMNS = ['Identifier', 'Cost', 'Annual_Saving', 'Total_CO2', 'Electricity_Saving', 'Gas_Saving',
-                      'Electricity_Bill_Saving', 'Gas_Bill_Saving', 'Category', 'Group', 'Index']
+MEASURE_VALIDATION_COLUMNS = ['Identifier', 'Cost', 'Annual_Saving', 'Total_CO2', 'Electricity_Saving', 'Gas_Saving',
+                              'Electricity_Bill_Saving', 'Gas_Bill_Saving', 'Category', 'Group', 'Index']
 
 
 def validate_complete_data(FullData, ids):
@@ -30,19 +30,19 @@ def validate_complete_data(FullData, ids):
     test_for_nan = True
     # Check that it has all of the Columns needed
     baseline_columns = list(FullData.baseline.columns)
-    baseline_columns_diff = list(set(BASELINE_DF_COLUMNS) - set(baseline_columns))
+    baseline_columns_diff = list(set(BASELINE_VALIDATION_COLUMNS) - set(baseline_columns))
     if baseline_columns_diff:
         test_for_nan = False
         errors.append('Baseline data is missing columns: %s' % ', '.join(baseline_columns_diff))
     measure_columns = list(FullData.measure_data.columns)  # TODO Convert this to return just the DF in all locations
-    measure_columns_diff = list(set(MEASURE_DF_COLUMNS) - set(measure_columns))
+    measure_columns_diff = list(set(MEASURE_VALIDATION_COLUMNS) - set(measure_columns))
     if measure_columns_diff:
         test_for_nan = False
         errors.append('Measure data is missing columns: %s' % ', '.join(measure_columns_diff))
 
     # Only test for NaN values if all columns are available:
     if test_for_nan:
-        if FullData.baseline.loc[FullData.baseline.Building.notna(), BASELINE_DF_COLUMNS].isna().values.any():
+        if FullData.baseline.loc[FullData.baseline.Building.notna(), BASELINE_VALIDATION_COLUMNS].isna().values.any():
             errors.append('Missing Data in Baseline dataset')
         measures_result = FullData.get_measure_data(ids)
         measures_df = pd.read_json(json.dumps(measures_result['measure_data']), orient='split')
