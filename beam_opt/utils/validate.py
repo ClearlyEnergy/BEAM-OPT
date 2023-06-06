@@ -42,18 +42,36 @@ def validate_complete_data(FullData, ids):
 
     # Only test for NaN values if all columns are available:
     if test_for_nan:
-        if FullData.baseline.loc[FullData.baseline.Building.notna(), BASELINE_VALIDATION_COLUMNS].isna().values.any():
-            errors.append('Missing Data in Baseline dataset')
+        # Should already be checked by pre-parsing
+        sub_df = FullData.baseline.loc[FullData.baseline.Building.notna(), BASELINE_VALIDATION_COLUMNS]
+        nan_values = sub_df.isna().values.any()
+        if nan_values:
+            cols_with_nans = sub_df.columns[nan_values].tolist()[0]
+            errors.append('Missing Data in Baseline dataset in columnns: ' + ', '.join(cols_with_nans))
+
         measures_result = FullData.get_measure_data(ids)
         measures_df = pd.read_json(json.dumps(measures_result['measure_data']), orient='split')
-        if measures_df.loc[measures_df.Building.notna(), ['Identifier', 'Cost', 'Category', 'Group', 'Index']
-                           ].isna().values.any():
-            errors.append("Missing data in Measures dataset")
 
-        if measures_df.loc[measures_df.Building.notna(), ['Annual_Saving', 'Total_CO2', 'Electricity_Saving',
-                                                          'Gas_Saving','Electricity_Bill_Saving', 'Gas_Bill_Saving']
-                           ].isna().values.any():
-            errors.append("Missing data in Scenarios dataset")
+        sub_df = measures_df.loc[measures_df.Building.notna(), ['Identifier', 'Cost', 'Category', 'Group', 'Index']]
+        nan_values = sub_df.isna().values.any()
+        if nan_values:
+            cols_with_nans = sub_df.columns[nan_values].tolist()[0]
+            errors.append('Missing data in one or more Measures: ' + ', '.join(cols_with_nans))
+
+        sub_df = measures_df.loc[measures_df.Building.notna(),
+                                 ['Annual_Saving', 'Total_CO2', 'Electricity_Saving',
+                                  'Gas_Saving', 'Electricity_Bill_Saving', 'Gas_Bill_Saving']]
+        mapping = {'Annual_Saving': 'annual_cost_savings',
+                   'Total_CO2': 'annual_electricity_energy/annual_natural_gas_energy',
+                   'Electricity_Saving': 'annual_electricity_energy',
+                   'Gas_Saving': 'annual_natural_gas_energy',
+                   'Electricity_Bill_Saving': 'annual_electricity_savings',
+                   'Gas_Bill_Saving': 'annual_natural_gas_savings'
+                   }
+        nan_values = sub_df.isna().values.any()
+        if nan_values:
+            cols_with_nans = sub_df.columns[nan_values].tolist()[0]
+            errors.append('Missing data in one or more Scenarios: ' + ', '.join([mapping[i] for i in cols_with_nans]))
 
     return errors if errors else None
 
