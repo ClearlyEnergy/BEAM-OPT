@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import itertools
 
+from beam_opt.models.data_container import CompleteData
 
 class Optimizer:
     lookups = {
@@ -36,13 +37,12 @@ class Optimizer:
         }
     }
 
-    def __init__(self, FullData, Building_ID, timeline):
-        ID = [str(Building_ID)]
-        if len(ID) != 1:
-            raise Exception("Received incorrect number of building ID")
-
-        # Retrieve and store baseline data from FullData
-        baseline_result = FullData.get_baseline_data(ID)
+    def __init__(self, complete_data: CompleteData, bldg_id, timeline: list):
+        bldg_id = [str(bldg_id)]
+        if len(bldg_id) != 1:
+            raise Exception("Received incorrect number of building ids")
+        # Retrieve and store baseline data from complete_data
+        baseline_result = complete_data.get_baseline_data(bldg_id)
         baseline_df = pd.read_json(json.dumps(baseline_result['building_data']), orient='split')
         self.baseline = baseline_df.copy()
         # Perform Baseline Preprocessing
@@ -50,8 +50,8 @@ class Optimizer:
         # This next line should be changed once more data available
         self.baseline['Year'] = timeline[0]+np.arange(0, self.baseline.shape[0])
 
-        # Retrieve and store measures data from FullData
-        measures_result = FullData.get_measure_data(ID)
+        # Retrieve and store measures data from complete_data
+        measures_result = complete_data.get_measure_data(bldg_id)
         measures_df = pd.read_json(json.dumps(measures_result['measure_data']), orient='split')
         self.df = measures_df.copy()
         self.df['Total_Saving'] = self.df.Electricity_Saving + self.df.Gas_Saving
@@ -59,8 +59,8 @@ class Optimizer:
         self.df = self.df.sort_values(['Group', 'Index'], ascending=[True, True])
         self.df.reset_index(inplace=True, drop=True)
 
-        # Retrieve and store Priority data from FullData
-        priority_results = FullData.get_priority_chart(ID)
+        # Retrieve and store Priority data from complete_data
+        priority_results = complete_data.get_priority_chart(bldg_id)
         self.priority = [*priority_results['priority_chart'].values()][0]
 
         self.total_years = timeline[-1] - timeline[0] + 1
@@ -155,20 +155,25 @@ class Optimizer:
 
     def _prep(self):
         # State matrix
-        self.Xmat = np.array(
-            list(itertools.product(*[[0] + x for x in self.selected_df.groupby("Group").Index.apply(list)])))
+        indices_by_group = self.selected_df.groupby("Group").Index.apply(list)
+        indices_by_group = [[0] + indices for indices in indices_by_group]
+        self.Xmat = np.array(list(itertools.product(*indices_by_group)))
         self.ns = self.Xmat.shape[0]  # number of states
+        
         # Exclude infeasible states by priority
         ind_priority = np.ones(self.ns, dtype=bool)
-        for i in list(set(self.priority.index[self.priority.any(axis=1)]) & set(self.selected_groups)):
+        common_indices = list(set(self.priority.index[self.priority.any(axis=1)]) & set(self.selected_groups))
+        for i in common_indices:
             pos_i = self.selected_groups.index[self.selected_groups == i][0]
-            for j in list(set(self.priority.columns[self.priority.iloc[i].notna()]) & set(self.selected_groups)):
+            common_cols = list(set(self.priority.columns[self.priority.iloc[i].notna()]) & set(self.selected_groups))
+            for j in common_cols:
                 pos_j = self.selected_groups.index[self.selected_groups == j][0]
                 try:
                     ind1 = (self.Xmat[:, pos_i] > 0) | (self.Xmat[:, pos_j] == 0)
                 except IndexError:
                     print("!!" + str([pos_i, pos_j]))
                 ind_priority = ind_priority & ind1
+
         self.Xmat = self.Xmat[ind_priority]
         self.ns = self.Xmat.shape[0]
 
