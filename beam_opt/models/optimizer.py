@@ -334,6 +334,7 @@ class Optimizer:
         Cost_Inc = df_base.Cost_Incremental.fillna(df_base.Cost)
         self._preselect(target_num, scenario, discard_thres)
         delta_n = self.delta ** self.selected_df.Life
+
         for t in range(self.T):
             y_past = time_diff[:t].sum() if t > 0 else 0
             cost = 0
@@ -397,15 +398,18 @@ class Optimizer:
                 for t in range(1, self.T)
             ]
             self.solution = pd.DataFrame(sol)
-
             # If the suggested solution is no inferior to the base case, return as solution found
             if self.total_cost < obj_base:
                 return {'status': 'success', 'message': 'Solution found'}
             # If the suggested optimized solution is strictly worse than the base case, replace one candidate measure
-            # with an un-preselscted one and redo optimization
+            # with an un-preselected one and redo optimization
+           
             measure_unchosen = list(set(self.selected_df.Identifier) -
                                     set([x for y in list(self.solution['New Measure']) for x in y]))
-
+            
+            if len(measure_unchosen) == 0:
+                return {'status': 'success', 'message': 'Solution found'}
+            
             measure_ids = [ID in measure_unchosen for ID in self.selected_df.Identifier]
             measure_to_reduce = self.selected_df.iloc[self.selected_df.loc[measure_ids][lookup['data']].idxmin()]
             measure_to_reduce = measure_to_reduce.Identifier
