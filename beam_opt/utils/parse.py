@@ -298,15 +298,15 @@ def parse_beam_measures(property_id, elec_emission_rate, gas_emission_rate):
     # Properties will have to add data to the Electricity/Natural Gas Savings, and Electricity/Natural Gas Bill Savings
     # Columns in order to run properly
     # TODO Need to add these extra columns to BEAM, add check that Property has them
-    columns_needed = ['Annual Savings', 'Electricity Savings (kBtu)', 'Natural Gas Savings (kBtu)',
-                      'Electricity Bill Savings', 'Natural Gas Bill Savings']
-    missing_columns = []
-    for column in columns_needed:
-        if column not in state.extra_data:
-            missing_columns.append(column)
-    if missing_columns:
-        return {'status': 'error',
-                'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)}
+    # columns_needed = ['Annual Savings', 'Electricity Savings (kBtu)', 'Natural Gas Savings (kBtu)',
+    #                   'Electricity Bill Savings', 'Natural Gas Bill Savings']
+    # missing_columns = []
+    # for column in columns_needed:
+    #     if column not in state.extra_data:
+    #         missing_columns.append(column)
+    # if missing_columns:
+    #     return {'status': 'error',
+    #             'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)}
 
     property_baseline_data = [[
         str(property_id),                                                   # Building
