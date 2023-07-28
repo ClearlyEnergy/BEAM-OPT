@@ -68,9 +68,15 @@ def validate_complete_data(FullData, ids):
                    'Electricity_Bill_Saving': 'annual_electricity_savings',
                    'Gas_Bill_Saving': 'annual_natural_gas_savings'
                    }
-        nan_values = sub_df.isna().values.any()
-        if nan_values:
-            cols_with_nans = sub_df.columns[nan_values].tolist()[0]
+
+        nan_values = sub_df.isna().values
+        has_nan = [False for i in range(len(sub_df.columns))]
+        for row in range(len(nan_values)):
+            for col in range(len(nan_values[row])):
+                if nan_values[row, col]: has_nan[col] = True
+
+        if sub_df.isna().values.any():
+            cols_with_nans = sub_df.columns[has_nan].tolist()
             errors.append('Missing data in one or more Scenarios: ' + ', '.join([mapping[i] for i in cols_with_nans]))
 
     return errors if errors else None
