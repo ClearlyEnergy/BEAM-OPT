@@ -289,6 +289,7 @@ class Optimizer:
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
             Vnext = V
+
         # Forward recursion
         Xstar_idx = np.zeros(self.T, dtype=np.int64)
         for t in range(self.T):
@@ -298,12 +299,19 @@ class Optimizer:
         self.Xoptimal = self.Xmat[Xstar_idx]
         self.Xoptimal_ind = self.Xmat_ind[Xstar_idx]
         self.total_cost = V[0]
+        return self.forward(scenario, lookup, self.Xoptimal_ind)
+    
+    def forward(self, scenario_config, scenario='Consumption'):
+        """
+        Perform forward calculation of energy reductions given a configuration of scenario installations.
+        """
+        lookup = self.lookups[scenario]
 
         # Gather the overall reduction, and the reduction for Electricity and Gas
         scenario_df = pd.DataFrame(
-            {scenario: getattr(self, lookup['reduction'])[Xstar_idx],
-             'Electricity': (self.Xmat_ind @ self.selected_df[lookup['electricity']])[Xstar_idx],
-             'Gas': (self.Xmat_ind @ self.selected_df[lookup['gas']])[Xstar_idx],
+            {scenario: (scenario_config @ self.df[lookup['data']].values.reshape([-1, 1])).reshape(-1),
+             'Electricity': (scenario_config @ self.df[lookup['electricity']].values.reshape([-1, 1])).reshape(-1),
+             'Gas': (scenario_config @ self.df[lookup['gas']].values.reshape([-1, 1])).reshape(-1),
              'Year': self.timeline}
         ).merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
 
@@ -313,7 +321,7 @@ class Optimizer:
         output_df['electricity_reduced_to'] = self.baseline[lookup['baseline_electricity']] - scenario_df['Electricity']
         output_df['gas_reduced_to'] = self.baseline[lookup['baseline_gas']] - scenario_df['Gas']
         setattr(self, lookup['level'], output_df)
-
+        
         return {'solution': self.Xoptimal, 'objective': self.total_cost}
 
     def optimize(self, scenario='Consumption', target_num=16, discard_thres=1e-3, max_iter=None):
