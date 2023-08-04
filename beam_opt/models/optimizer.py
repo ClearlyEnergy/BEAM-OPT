@@ -299,13 +299,14 @@ class Optimizer:
         self.Xoptimal = self.Xmat[Xstar_idx]
         self.Xoptimal_ind = self.Xmat_ind[Xstar_idx]
         self.total_cost = V[0]
-        return self.forward(scenario, lookup, self.Xoptimal_ind)
+        return self._forward(self.Xoptimal_ind, scenario)
     
-    def forward(self, scenario_config, scenario='Consumption'):
+    def _forward(self, scenario_config, scenario='Consumption'):
         """
         Perform forward calculation of energy reductions given a configuration of scenario installations.
         """
         lookup = self.lookups[scenario]
+        # from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 6666).set_trace()
 
         # Gather the overall reduction, and the reduction for Electricity and Gas
         scenario_df = pd.DataFrame(
@@ -324,7 +325,7 @@ class Optimizer:
         
         return {'solution': self.Xoptimal, 'objective': self.total_cost}
 
-    def optimize(self, scenario='Consumption', target_num=16, discard_thres=1e-3, max_iter=None):
+    def optimize(self, scenario='Consumption', target_num=16, discard_thres=1e-3, max_iter=None, scenario_selection=None):
         lookup = self.lookups[scenario]
 
         if max_iter is None:
@@ -397,7 +398,11 @@ class Optimizer:
         # Begin optimization
         for i in range(max_iter):
             self._prep()
-            self._optimize(scenario)
+            if scenario_selection:
+                self._forward(scenario_selection, scenario)
+                self.Xoptimal_ind = np.array(scenario_selection)
+            else:
+                self._optimize(scenario)
             sol = [
                 {'Year': self.timeline[0], 'New Measure': self.selected_df.Identifier[self.Xoptimal_ind[0]].tolist()}
             ] + [
@@ -407,7 +412,7 @@ class Optimizer:
             ]
             self.solution = pd.DataFrame(sol)
             # If the suggested solution is no inferior to the base case, return as solution found
-            if self.total_cost < obj_base:
+            if scenario_selection or self.total_cost < obj_base:
                 return {'status': 'success', 'message': 'Solution found'}
             # If the suggested optimized solution is strictly worse than the base case, replace one candidate measure
             # with an un-preselected one and redo optimization
