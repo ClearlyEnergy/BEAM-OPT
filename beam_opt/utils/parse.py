@@ -367,16 +367,16 @@ def parse_beam_measures(property_id, elec_emission_rate, gas_emission_rate):
         gas_emission_rate)
     total_use_co2 = elec_use_co2 + gas_use_co2
 
-    missing_columns = []
-    for column in PROPERTY_STATE_REQUIRED_COLUMNS:
-        if column not in state.extra_data:
-            missing_columns.append(column)
-            
-    if missing_columns:
-        return {
-            'status': 'error',
-            'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
-        }
+    # missing_columns = []
+    # for column in PROPERTY_STATE_REQUIRED_COLUMNS:
+    #     if column not in state.extra_data:
+    #         missing_columns.append(column)
+    #         
+    # if missing_columns:
+    #     return {
+    #         'status': 'error',
+    #         'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
+    #     }
 
     property_baseline_data = [[
         str(property_id),                                                   # Building
