@@ -95,12 +95,10 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
     if len(budget) != len(optimizer.timeline) or len(target) != len(optimizer.timeline):
         errors.append('Invalid input: inconsistent with time line')
     if (np.array(budget) < 0).any():  # budget at each time
-        print('\n\n\nActually budget\n\n\n', flush=True)
-        errors.append('Invalid input: must choose target in [0,1]')
-    if (np.array(target) < 0).any() or (np.array(target) > 1).any():
-        print('\n\n\nActually target\n\n\n', flush=True)
+        errors.append('Invalid input: must choose budget > 0')
+    if (np.array(target) < 0).any():
         # target percentage of consumption/emission to remain at each time
-        errors.append('Invalid input: must choose target in [0,1]')
+        errors.append('Invalid input: must choose target > 0')
     if delta < 0 or delta > 1:  # discount factor
         errors.append('Invalid input: must choose delta in [0,1]')
     if penalty < 0:  # penalty rate for consumption/emission

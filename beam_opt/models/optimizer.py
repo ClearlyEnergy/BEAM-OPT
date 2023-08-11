@@ -104,7 +104,7 @@ class Optimizer:
         # Set target attribute
         target_df = pd.DataFrame({'Target': target, 'Year': self.timeline})
         target_df = target_df.merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
-        setattr(self, lookup['target'], target_df.Target * self.baseline[lookup['optimize']].iloc[0])
+        setattr(self, lookup['target'], target_df.Target * 1000)
 
         return {'status': 'success', 'message': ''}
 
@@ -311,7 +311,6 @@ class Optimizer:
         Perform forward calculation of energy reductions given a configuration of scenario installations.
         """
         lookup = self.lookups[scenario]
-        # from remote_pdb import RemotePdb; RemotePdb('0.0.0.0', 6666).set_trace()
 
         # Gather the overall reduction, and the reduction for Electricity and Gas
         scenario_df = pd.DataFrame(
@@ -404,10 +403,10 @@ class Optimizer:
         for i in range(max_iter):
             self._prep()
             if scenario_selection:
-                self.df = measure_df
+                self.df = measure_df # unfiltered dataframe of all scenarios for this property
                 self._forward(scenario_selection, measure_df, scenario)
                 self.Xoptimal_ind = np.array(scenario_selection)
-                sol = [
+                sol = [ # compile solution using unfiltered dataframe
                     {'Year': self.timeline[0], 'New Measure': self.df.Identifier[self.Xoptimal_ind[0]].tolist()}
                 ] + [
                     {'Year': self.timeline[t],
@@ -416,7 +415,7 @@ class Optimizer:
                 ]
             else:
                 self._optimize(scenario)
-                sol = [
+                sol = [ # compile solution using filtered dataframe
                     {'Year': self.timeline[0], 'New Measure': self.selected_df.Identifier[self.Xoptimal_ind[0]].tolist()}
                 ] + [
                     {'Year': self.timeline[t],
@@ -425,6 +424,7 @@ class Optimizer:
                 ]
             self.solution = pd.DataFrame(sol)
             # If the suggested solution is no inferior to the base case, return as solution found
+            # If a preconfigured scenario selection is provided, always return recalculated solution
             if scenario_selection or self.total_cost < obj_base:
                 return {'status': 'success', 'message': 'Solution found'}
             # If the suggested optimized solution is strictly worse than the base case, replace one candidate measure
@@ -433,6 +433,7 @@ class Optimizer:
             measure_unchosen = list(set(self.selected_df.Identifier) -
                                     set([x for y in list(self.solution['New Measure']) for x in y]))
             
+            # If there are not any more measures to consider, return found solution
             if len(measure_unchosen) == 0:
                 return {'status': 'success', 'message': 'Solution found'}
             
