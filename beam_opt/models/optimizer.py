@@ -104,7 +104,7 @@ class Optimizer:
         # Set target attribute
         target_df = pd.DataFrame({'Target': target, 'Year': self.timeline})
         target_df = target_df.merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
-        setattr(self, lookup['target'], target_df.Target * 1000)
+        setattr(self, lookup['target'], target_df.Target * 1000) # target_df.Target is in mtCO2e, convert to kg
 
         return {'status': 'success', 'message': ''}
 
