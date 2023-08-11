@@ -304,9 +304,9 @@ class Optimizer:
         self.Xoptimal = self.Xmat[Xstar_idx]
         self.Xoptimal_ind = self.Xmat_ind[Xstar_idx]
         self.total_cost = V[0]
-        return self._forward(self.Xoptimal_ind, self.df, scenario)
+        return self._forward(self.Xoptimal_ind, scenario)
     
-    def _forward(self, scenario_selection, measure_df, scenario='Consumption'):
+    def _forward(self, scenario_selection, scenario='Consumption'):
         """
         Perform forward calculation of energy reductions given a configuration of scenario installations.
         """
@@ -314,9 +314,9 @@ class Optimizer:
 
         # Gather the overall reduction, and the reduction for Electricity and Gas
         scenario_df = pd.DataFrame(
-            {scenario: (scenario_selection @ measure_df[lookup['data']].values.reshape([-1, 1])).reshape(-1),
-             'Electricity': (scenario_selection @ measure_df[lookup['electricity']].values.reshape([-1, 1])).reshape(-1),
-             'Gas': (scenario_selection @ measure_df[lookup['gas']].values.reshape([-1, 1])).reshape(-1),
+            {scenario: (scenario_selection @ self.df[lookup['data']].values.reshape([-1, 1])).reshape(-1),
+             'Electricity': (scenario_selection @ self.df[lookup['electricity']].values.reshape([-1, 1])).reshape(-1),
+             'Gas': (scenario_selection @ self.df[lookup['gas']].values.reshape([-1, 1])).reshape(-1),
              'Year': self.timeline}
         ).merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
 
@@ -404,7 +404,7 @@ class Optimizer:
             self._prep()
             if scenario_selection:
                 self.df = measure_df # unfiltered dataframe of all scenarios for this property
-                self._forward(scenario_selection, measure_df, scenario)
+                self._forward(scenario_selection, scenario)
                 self.Xoptimal_ind = np.array(scenario_selection)
                 sol = [ # compile solution using unfiltered dataframe
                     {'Year': self.timeline[0], 'New Measure': self.df.Identifier[self.Xoptimal_ind[0]].tolist()}
