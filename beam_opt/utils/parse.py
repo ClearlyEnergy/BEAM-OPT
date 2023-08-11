@@ -3,6 +3,8 @@
 """
 Provide Various Parsing Functions for Measures formats
 """
+from copy import copy
+import time
 from django.conf import settings
 import json
 import numpy as np
@@ -10,6 +12,52 @@ import os.path
 import pandas as pd
 import warnings
 import xml.etree.ElementTree as Et
+from seed.models.measures import Measure
+from seed.models.property_measures import PropertyMeasure
+from seed.models.scenarios import Scenario
+from seed.serializers.scenarios import ScenarioSerializer
+
+# TODO: Remove columns that optimizer doesn't use.
+
+MEASURE_DF_COLUMNS = [
+    'Building',
+    'Identifier',
+    'Description',
+    'Cost',
+    'Annual_Saving',
+    'Scenario',
+    'Electricity_CO2',
+    'Gas_CO2',
+    'Total_CO2',
+    'Electricity_Saving',
+    'Gas_Saving',
+    'Electricity_Bill_Saving',
+    'Gas_Bill_Saving',
+    'Category',
+    'Cost_Incremental',
+    'Cost_Bulk',
+    'Life',
+]
+
+BASELINE_DF_COLUMNS = [
+    'Building',
+    'Annual_Bill',
+    'Electricity_CO2',
+    'Gas_CO2',
+    'Total_CO2',
+    'Electricity_Consumption',
+    'Gas_Consumption',
+    'Electricity_Bill',
+    'Gas_Bill',
+]
+
+PROPERTY_STATE_REQUIRED_COLUMNS = [
+    'Annual Savings',
+    'Electricity Savings (kBtu)',
+    'Natural Gas Savings (kBtu)',
+    'Electricity Bill Savings',
+    'Natural Gas Bill Savings'
+]
 
 standalone = getattr(settings, 'STANDALONE', False)
 if not standalone:      # If running with BEAM, import BEAM models
@@ -52,7 +100,8 @@ def parse_measures(request):
         # path = default_storage.save('heart_of_the_swarm.txt', ContentFile(file.read()))
         schema = get_schema(file)  # Determine if it's BuildingSync or HPXML Schema
         if schema == 'BuildingSync':
-            return parse_buildingsync(file, request.data.get('electricity_emission_rate'),
+            return parse_buildingsync(file,
+                                      request.data.get('electricity_emission_rate'),
                                       request.data.get('natural_gas_emission_rate'))
         elif schema == 'HPXML':
             return parse_hpxml(file)
@@ -88,16 +137,6 @@ def parse_hpxml(file):
             'message': '',
             'measure_data': measures_json}  # 'baseline_data':df_baseline}  TODO
 
-
-MEASURE_DF_COLUMNS = ['Building', 'Identifier', 'Description', 'Cost', 'Annual_Saving', 'Scenario',
-                      'Electricity_CO2', 'Gas_CO2', 'Total_CO2', 'Electricity_Saving', 'Gas_Saving',
-                      'Electricity_Bill_Saving', 'Gas_Bill_Saving', 'Category', 'Cost_Incremental', 'Cost_Bulk', 'Life']
-
-BASELINE_DF_COLUMNS = ['Building', 'Annual_Bill', 'Electricity_CO2', 'Gas_CO2', 'Total_CO2',
-                       'Electricity_Consumption', 'Gas_Consumption', 'Electricity_Bill',
-                       'Gas_Bill']
-
-
 def convert_to_kg(emission, starting_units, emission_rate):
     if not emission:
         return 0
@@ -106,7 +145,6 @@ def convert_to_kg(emission, starting_units, emission_rate):
     if starting_units == 'kbtu':
         emission = emission / 1000
     return emission * emission_rate
-
 
 def parse_buildingsync(file, elec_emission_rate, gas_emission_rate):
     """
@@ -153,10 +191,11 @@ def parse_buildingsync(file, elec_emission_rate, gas_emission_rate):
         bulk_cost = m.get('measure_total_first_cost', 0) + m.get('measure_installation_cost', 0) + m.get(
             'measure_material_cost', 0)
         bulk_cost = bulk_cost or None  # Change to None in case costs are not available
+        
         measures.append([
             str(data.get('property_name')),                             # Building ID
             m.get('property_measure_name'),                             # Identifier
-            m.get('name'),                                              # Measure
+            m.get('name'),                                              # Description
             m.get('measure_total_first_cost'),                          # Cost
             best_scenario.get('annual_cost_savings'),                   # Annual_Saving
             best_scenario.get('name'),                                  # Scenario
@@ -165,7 +204,6 @@ def parse_buildingsync(file, elec_emission_rate, gas_emission_rate):
             electricity_co2 + gas_co2,                                  # Total CO2 use (kbtu)  to (kg)
             best_scenario.get('annual_electricity_savings'),            # Electricity Savings (kbtu)
             best_scenario.get('annual_natural_gas_savings'),            # Gas Savings (kbtu)
-            # # Below 2 don't get used in optimize.py?
             (best_scenario.annual_cost_savings or 0) / 2,               # Electricity Bill Savings
             (best_scenario.annual_cost_savings or 0) / 2,               # Gas Bill Savings
             m.get('category'),                                          # Measure Category Name
@@ -206,107 +244,139 @@ def parse_buildingsync(file, elec_emission_rate, gas_emission_rate):
             'baseline_data': baseline_json,
             'source': 'BuildingSync'}
 
+def _reduce_scenarios(scenarios_data):
+    """ Removes scenarios that overlap in measures. Criteria for picking between
+        two Scenarios is defined by _worse_scenario.
+
+        :param scenarios_data: serialized list of Scenario data
+        :return: list of scenarios that do not have overlapping measures.
+    """
+    scenario_lookup = {s['id']: (s, set([m['display_name'] for m in s['measures']])) for s in scenarios_data}
+    results = set()
+    
+    def _reduce_scenarios_rec(scenario_ids: list):
+        if len(scenario_ids) == 0:
+            return
+        if len(scenario_ids) == 1:
+            results.add(scenario_ids[0])
+            return
+        
+        l_scenario, l_measures = scenario_lookup[scenario_ids[0]]
+        worse_id = None
+        for s_id in scenario_ids[1:]:
+            r_scenario, r_measures = scenario_lookup[s_id]
+            if not l_measures.isdisjoint(r_measures):
+                worse_id = _worse_scenario(l_scenario, r_scenario)['id']
+                break
+        
+        if worse_id == None:
+            results.add(l_scenario['id'])
+            scenario_ids = scenario_ids[1:]
+        else:
+            scenario_ids = [_id for _id in scenario_ids if _id != worse_id]
+
+        _reduce_scenarios_rec(scenario_ids)
+    
+    _reduce_scenarios_rec([s['id'] for s in scenarios_data])
+    return [scenario_lookup[s_id][0] for s_id in results]
 
 def parse_beam_measures(property_id, elec_emission_rate, gas_emission_rate):
     """
     Parse BEAM set of Measures and Scenarios, when called through BEAM Analysis Framework
     """
-    pv = PropertyView.objects.filter(id=property_id)
-    if not pv:
+    try:
+        state = PropertyView.objects \
+            .select_related('state') \
+            .get(id=property_id) \
+            .state
+    except PropertyView.DoesNotExist:
         return {'status': 'error', 'message': 'Must pass property_view_id as data parameter'}
-    state = pv.first().state
 
     if elec_emission_rate is None or gas_emission_rate is None:
         return {'status': 'error', 'message': 'Must pass valid fuel type emission rates.'}
-
-    # Get measures and scenarios associated with this property
-    property_measures = PropertyMeasure.objects.filter(property_state_id=state.id).select_related('measure')
-
-    # Process Measures
+    
+    scenarios = Scenario.objects \
+        .filter(property_state_id=state.id) \
+        .prefetch_related("measures")
+    scenarios = ScenarioSerializer(scenarios, many=True).data
+    scenarios = _reduce_scenarios(scenarios)
     measures = []
-    for property_measure in property_measures:
-        measure = property_measure.measure
-        scenarios = property_measure.scenario_set.all()
-        best_scenario = None
-        # Get scenario that has the best savings
-        if scenarios:
-            elec_savings = scenarios[0].annual_electricity_savings
-            ngas_savings = scenarios[0].annual_natural_gas_savings
-
-            for s in scenarios:
-                electricity_savings_diff, gas_savings_diff = 0, 0
-
-                if s.annual_electricity_savings is not None:
-                    electricity_savings_diff = elec_savings - s.annual_electricity_savings
-                if s.annual_natural_gas_savings is not None:
-                    gas_savings_diff = ngas_savings - s.annual_natural_gas_savings
-
-                if electricity_savings_diff + gas_savings_diff >= 0:
-                    elec_savings = s.annual_electricity_savings
-                    ngas_savings = s.annual_natural_gas_savings
-                    best_scenario = s
-
-        if best_scenario is None:
-            # TODO add message that measure was skipped?
+    for scenario in scenarios:
+        scenario_measures = scenario['measures']
+        if len(scenario_measures) == 0:
             continue
 
-        # Preprocess energy usage data
-        electricty_co2 = convert_to_kg(best_scenario.annual_electricity_energy, 'kbtu', elec_emission_rate)
-        gas_co2 = convert_to_kg(best_scenario.annual_natural_gas_energy, 'kbtu', gas_emission_rate)
+        cost_total_first = 0
+        cost_mv = 0
+        cost_material = 0
+        max_useful_life = 0
+        for pm in scenario_measures:
+            cost_total_first += (pm['cost_total_first'] or 0)
+            cost_mv += (pm['cost_mv'] or 0)
+            cost_material += (pm['cost_material'] or 0)
+            max_useful_life = max(pm['useful_life'] or 0, max_useful_life)
 
-        # best_scenario.annual_source_energy = best_scenario.annual_source_energy or 0
-        # best_scenario.annual_site_energy = best_scenario.annual_site_energy or 0
-        # best_scenario_total_co2_use = best_scenario.annual_source_energy + best_scenario.annual_site_energy
-        best_scenario_total_co2_use = electricty_co2 + gas_co2
-        bulk_cost = (property_measure.cost_total_first or 0) + (property_measure.cost_installation or 0) + (
-                property_measure.cost_material or 0)
-        bulk_cost = bulk_cost or None  # Change to None in case costs are 0
+        electricty_co2 = convert_to_kg(
+            scenario['annual_electricity_energy'],
+            'kbtu',
+            elec_emission_rate)
+        gas_co2 = convert_to_kg(
+            scenario['annual_natural_gas_energy'],
+            'kbtu',
+            gas_emission_rate)
+        total_co2 = electricty_co2 + gas_co2
+        bulk_cost = (cost_total_first + cost_mv + cost_material) or None
+        category_name = scenario['name'] if len(scenario_measures) > 1 else scenario_measures[0]['id']
 
         measures.append([
-            str(property_id),                                               # Building ID
-            property_measure.id,                                            # Identifier
-            measure.display_name,                                           # Description
-            property_measure.cost_total_first,                              # Cost
-            best_scenario.annual_cost_savings,                              # Annual_Saving
-            best_scenario.name if best_scenario.name else 'N/A',            # Scenario
-            electricty_co2,                                                 # Electricity CO2 (mmbtu) to (kg)
-            gas_co2,                                                        # Gas CO2 (mmbtu) to (kg)
-            best_scenario_total_co2_use,                                    # Total CO2 Use  (kbtu) to (kg), sum of ^2
-            best_scenario.annual_electricity_savings,                       # Electricity Savings (kbtu)
-            best_scenario.annual_natural_gas_savings,                       # Gas Savings (kbtu)
-                                                                            # # Below 2 don't get used in optimize.py?
-            (best_scenario.annual_cost_savings or 0) / 2,                   # Electricity Bill Savings
-            (best_scenario.annual_cost_savings or 0) / 2,                   # Gas Bill Savings
-            measure.category_display_name,                                  # Measure Category Name
-            property_measure.cost_mv,                                       # Cost Incremental
-            bulk_cost,                                                      # Cost Bulk (Sum of all costs)
-            property_measure.useful_life,                                   # Measure Lifetime
+            str(property_id),                                # Building ID
+            scenario['id'],                                  # Identifier
+            scenario['name'],                                # Description
+            cost_total_first,                                # Cost
+            scenario['annual_cost_savings'],                 # Annual_Saving
+            scenario['name'] if scenario['name'] else 'N/A', # Scenario
+            electricty_co2,                                  # Electricity CO2 (mmbtu) to (kg)
+            gas_co2,                                         # Gas CO2 (mmbtu) to (kg)
+            total_co2,                                       # Total CO2 Use  (kbtu) to (kg), sum of ^2
+            scenario['annual_electricity_savings'],          # Electricity Savings (kbtu)
+            scenario['annual_natural_gas_savings'],          # Gas Savings (kbtu)
+            (scenario['annual_cost_savings'] or 0) / 2,      # Electricity Bill Savings
+            (scenario['annual_cost_savings'] or 0) / 2,      # Gas Bill Savings
+            category_name,                                   # Measure Category Name
+            cost_mv,                                         # Cost of Measurement and Validation
+            bulk_cost,                                       # Cost Bulk (Sum of all costs)
+            max_useful_life,                                 # Measure Lifetime
         ])
-
-        # If any of the Measure data is None, do not add to the set of Measures
-        # if None not in measure:
-        #     measures.append(measure)
-
+    
     df = pd.DataFrame(measures, columns=MEASURE_DF_COLUMNS)
+    # Discard expensive measures with the same effect
+    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Annual_Saving']).Cost.idxmin().fillna(0).astype(int)]
+    df.sort_index(inplace=True)
+    # Discard less effective measures with the same cost
+    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Cost']).Annual_Saving.idxmax().fillna(0).astype(int)]
+    df.sort_index(inplace=True)
 
     # Build dataframe with base information about the property
-    elec_use_co2 = convert_to_kg(state.extra_data.get('Electricity Use - Grid Purchase (kBtu)'), 'kbtu',
-                                 elec_emission_rate)
-    gas_use_co2 = convert_to_kg(state.extra_data.get('Natural Gas Use (kBtu)'), 'kbtu', gas_emission_rate)
+    elec_use_co2 = convert_to_kg(
+        state.extra_data.get('Electricity Use - Grid Purchase (kBtu)'),
+        'kbtu',
+        elec_emission_rate)
+    gas_use_co2 = convert_to_kg(
+        state.extra_data.get('Natural Gas Use (kBtu)'),
+        'kbtu',
+        gas_emission_rate)
     total_use_co2 = elec_use_co2 + gas_use_co2
 
-    # Properties will have to add data to the Electricity/Natural Gas Savings, and Electricity/Natural Gas Bill Savings
-    # Columns in order to run properly
-    # TODO Need to add these extra columns to BEAM, add check that Property has them
-    columns_needed = ['Annual Savings', 'Electricity Savings (kBtu)', 'Natural Gas Savings (kBtu)',
-                      'Electricity Bill Savings', 'Natural Gas Bill Savings']
-    missing_columns = []
-    for column in columns_needed:
-        if column not in state.extra_data:
-            missing_columns.append(column)
-    if missing_columns:
-        return {'status': 'error',
-                'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)}
+    # missing_columns = []
+    # for column in PROPERTY_STATE_REQUIRED_COLUMNS:
+    #     if column not in state.extra_data:
+    #         missing_columns.append(column)
+    #         
+    # if missing_columns:
+    #     return {
+    #         'status': 'error',
+    #         'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
+    #     }
 
     property_baseline_data = [[
         str(property_id),                                                   # Building
@@ -319,15 +389,17 @@ def parse_beam_measures(property_id, elec_emission_rate, gas_emission_rate):
         state.extra_data.get('Electricity Bill Savings', 0),                # Electricity Bill Savings
         state.extra_data.get('Natural Gas Bill Savings', 0),                # Gas Bill Savings
     ]]
-    df_baseline = pd.DataFrame(property_baseline_data, columns=BASELINE_DF_COLUMNS)
 
+    df_baseline = pd.DataFrame(property_baseline_data, columns=BASELINE_DF_COLUMNS)
     measures_json = json.loads(df.to_json(orient='split'))
     baseline_json = json.loads(df_baseline.to_json(orient='split'))
-    return {'status': 'success',
-            'message': '',
-            'measure_data': measures_json,
-            'baseline_data': baseline_json,
-            'source': 'BEAM'}
+    return {
+        'status': 'success',
+        'message': '',
+        'measure_data': measures_json,
+        'baseline_data': baseline_json,
+        'source': 'BEAM'
+    }
 
 
 # Hard-coded dictionary to reform RMI measures into BuildingSync naming
@@ -416,7 +488,6 @@ def parse_xlsx(file_measure, file_life, bld_list, sync_dict=RMICODE_TO_BUILDINGS
 
     # Discard expensive measures with the same effect
     df = df.loc[df.fillna(np.inf).groupby(['Building', 'Annual_Saving']).Cost.idxmin().fillna(0).astype(int)]
-    df = df.apply(lambda x: x)
     df.sort_index(inplace=True)
     # Discard less effective measures with the same cost
     df = df.loc[df.fillna(np.inf).groupby(['Building', 'Cost']).Annual_Saving.idxmax().fillna(0).astype(int)]
@@ -487,3 +558,17 @@ def group_identifier_rmi(s):
         return 'E-L'
     else:
         return tmp
+
+def _worse_scenario(left_scenario, right_scenario):
+    """ Select the scenario with lower energy savings. If tie, return left scenario
+
+    :param left_scenario: a serialized Scenario object
+    :param right_scenario: a serialized Scenario object
+    :return: whichever scenario is less favorable by the defined criteria
+    """
+    left_savings = left_scenario['annual_electricity_savings'] \
+        + left_scenario['annual_natural_gas_savings']
+    right_savings = right_scenario['annual_electricity_savings'] \
+        + right_scenario['annual_natural_gas_savings']
+
+    return left_scenario if left_savings <= right_savings else right_scenario
