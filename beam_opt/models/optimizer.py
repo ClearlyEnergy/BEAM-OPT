@@ -202,10 +202,10 @@ class Optimizer:
         excess = getattr(self.baseline, lookup['optimize']).values[None, :] - getattr(self, lookup['reduction'])[:, None]
         excess = excess - np.array(getattr(self, lookup['target']))[None, :]
 
-        excess_payment = np.zeros([self.ns, self.total_years])
-        excess_payment[excess > 0] = excess[excess > 0] * self.penalty
-
         time_diff = np.diff(self.timeline)
+        excess_payment = np.zeros([self.ns, self.total_years])
+        excess_payment[excess > 0] = excess[excess > 0] * self.penalty * time_diff[excess > 0]
+
         delta_n = self.delta ** self.selected_df.Life
         all_indices = np.arange(self.ns, dtype=np.int64)
         Cost_Inc = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost)
@@ -382,14 +382,14 @@ class Optimizer:
                     time_delta = self.timeline[t] - self.timeline[0]
                     excess_penalty = np.maximum(getattr(self.baseline, lookup['optimize']).iloc[time_delta] -
                                                 reducing_power - getattr(self, lookup['target']).iloc[time_delta], 0)
-                    excess_penalty *= self.penalty
+                    excess_penalty *= self.penalty * time_diff[t - 1]
                     if not np.isinf(excess_penalty) and t < (self.T - 1):
                         for y in range(time_diff[t] - 1, -1, -1):
                             if np.isinf(excess_penalty):
                                 break
                             excess = np.maximum(getattr(self.baseline, lookup['optimize']).iloc[y_past + y] -
                                                 reducing_power - getattr(self, lookup['target']).iloc[y_past + y], 0)
-                            excess_penalty = self.delta * excess_penalty + excess * self.penalty
+                            excess_penalty = self.delta * excess_penalty + excess * self.penalty * time_diff[t - 1]
 
                     if np.isinf(excess_penalty):
                         obj_base = np.inf
