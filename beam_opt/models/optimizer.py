@@ -204,7 +204,7 @@ class Optimizer:
 
         time_diff = np.diff(self.timeline)
         excess_payment = np.zeros([self.ns, self.total_years])
-        excess_payment[excess > 0] = excess[excess > 0] * self.penalty * time_diff[excess > 0]
+        excess_payment[excess > 0] = excess[excess > 0] * self.penalty
 
         delta_n = self.delta ** self.selected_df.Life
         all_indices = np.arange(self.ns, dtype=np.int64)
