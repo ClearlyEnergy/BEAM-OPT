@@ -108,7 +108,7 @@ class Optimizer:
 
         return {'status': 'success', 'message': ''}
 
-    def _preselect(self, target_num=16, scenario='Consumption', discard_thres=1e-3):
+    def _preselect(self, target_num=15, scenario='Consumption', discard_thres=1e-3):
         # Discard measures with negative electricity and gas savings
         lookup = self.lookups[scenario]
         self.selected_df = self.df[(self.df[lookup['electricity']] >= 0) | self.df[lookup['gas']] >= 0]
@@ -329,7 +329,7 @@ class Optimizer:
         
         return {'solution': self.Xoptimal, 'objective': self.total_cost}
 
-    def optimize(self, scenario='Consumption', target_num=16, discard_thres=1e-3, max_iter=None, scenario_selection=None, scenario_costs_savings=None, measure_df=None):
+    def optimize(self, scenario='Consumption', target_num=15, discard_thres=1e-3, max_iter=None, scenario_selection=None, scenario_costs_savings=None, measure_df=None):
         lookup = self.lookups[scenario]
 
         if max_iter is None:
