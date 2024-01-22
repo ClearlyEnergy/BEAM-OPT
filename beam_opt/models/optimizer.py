@@ -205,19 +205,18 @@ class Optimizer:
         excess = getattr(self.baseline, lookup['optimize']).values[None, :] - getattr(self, lookup['reduction'])[:, None]
         excess = excess - np.array(getattr(self, lookup['target']))[None, :]
 
-        time_diff = np.diff(self.timeline)
-        excess_payment = np.zeros([self.ns, self.total_years])
+        time_diff: np.ndarray = np.diff(self.timeline)
+        excess_payment: np.ndarray[np.float_] = np.zeros([self.ns, self.total_years])
         excess_payment[excess > 0] = excess[excess > 0] * self.penalty
 
         delta_n = self.delta ** self.selected_df.Life
         all_indices = np.arange(self.ns, dtype=np.int64)
         Cost_Inc = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost)
 
-
-        selected_priority = self.priority.loc[self.selected_groups, self.selected_groups]
-        ind_priority = np.ones([self.ns, self.ns], dtype=bool)
+        selected_priority: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
+        ind_priority: np.ndarray[np.bool_] = np.ones([self.ns, self.ns], dtype=bool)
         ind_needPrereq = (~selected_priority.isna()).any(axis=0)
-        ind_installed: np.ndarray[bool] = self.Xmat.astype(bool)
+        ind_installed: np.ndarray[np.bool_] = self.Xmat.astype(bool)
 
         ind_feasible_list = []
         for i in range(self.ns):
@@ -226,8 +225,6 @@ class Optimizer:
             ind_feasible_list.append(ind_feasible & ind_priority[i])
             
             self._compute_feasible_state(selected_priority, ind_installed, ind_needPrereq, ind_priority, i)
-                
-                
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.df.columns:
@@ -241,6 +238,7 @@ class Optimizer:
         Vnext = np.zeros(self.ns)  # Terminal value function
 
         # Backward recursion
+        first_year = self.timeline[0]
         for t in range(self.T - 1, -1, -1):
             # Discount factor for discounting V_{t+1}
             disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
@@ -256,11 +254,18 @@ class Optimizer:
             n_life = np.floor((self.timeline[-1] - self.timeline[t]) / self.selected_df.Life)
             sum_disc_life = n_life if self.delta == 1 else delta_n * (1 - delta_n ** n_life) / (1 - delta_n)
 
+            unavail_factors = (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
+            if t < self.T - 1:
+                current_time_range = range(time_diff[t] - 1, -1, -1)
+            else:
+                current_time_range = range(0)
+
+            time_span = self.timeline[t] - first_year
+
             # Compute V_t for each state
             for i in range(self.ns):
                 # Check if the state is possible at all by start year
                 if t > 0 and (self.Xmat[i, unavailable_groups[t - 1]] > 0).any():
-                    V[i] = np.inf
                     Xt_idx[t, i] = -1  # Use -1 as indicator of null
                     continue
 
@@ -269,7 +274,7 @@ class Optimizer:
                 
                 # Choose feasible decision variables by start year
                 if unavailable_groups[t]:
-                    ind_feasible = ind_feasible_list[i] & (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
+                    ind_feasible = ind_feasible_list[i] & unavail_factors
                 else:
                     ind_feasible = ind_feasible_list[i]
 
@@ -281,17 +286,17 @@ class Optimizer:
                 costs = Xnew_ind @ self.selected_df.Cost
                 ind_cost = (costs <= self.budget[t])
                 if not ind_cost.any():
-                    V[i] = np.inf
                     Xt_idx[t, i] = -1
                     continue
 
                 # Index of feasible decision variables in self.Xmat (self.Xmat_ind)
                 idx_feasible = all_indices[ind_feasible][ind_cost]
                 # Compute V_t values
-                obj_vals = excess_payment[idx_feasible, self.timeline[t] - self.timeline[0]]
-                if t < self.T - 1:
-                    for y in range(time_diff[t] - 1, -1, -1):
-                        obj_vals = excess_payment[idx_feasible, y_past + y] + self.delta * obj_vals
+                obj_vals = excess_payment[idx_feasible, time_span]
+                
+                for y in current_time_range:
+                    obj_vals = excess_payment[idx_feasible, y_past + y] + self.delta * obj_vals
+                
                 obj_vals = obj_vals + disc * Vnext[idx_feasible]
                 if not target_only:
                     costs_inc = self.Xmat_ind[idx_feasible] @ (Cost_Inc * sum_disc_life)  # Cost for replacement
