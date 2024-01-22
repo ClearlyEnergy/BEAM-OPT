@@ -12,8 +12,6 @@ import itertools
 
 from beam_opt.models.data_container import CompleteData
 
-pr = cProfile.Profile()
-
 class Optimizer:
     lookups = {
         'Consumption': {
@@ -231,13 +229,23 @@ class Optimizer:
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.df.columns:
-            unavailable_groups = self.selected_df.groupby('Group').Start_Year.first().values[None, :] > self.timeline[:, None]
+            start_years = self.selected_df.groupby('Group').Start_Year.first().values[None, :]
+            unavailable_groups = start_years > self.timeline[:, None]
         else:
             unavailable_groups = np.repeat(False, len(self.selected_groups))
 
         V = np.zeros(self.ns)  # Value function
         Xt_idx = np.zeros([self.T, self.ns], dtype=np.int64)  # Optimal decision for each state
         Vnext = np.zeros(self.ns)  # Terminal value function
+
+
+        # Precalculate feasible decision variables by definition
+        feasible_inds = []
+        # Xmat_extended = np.tile(self.Xmat[:,:,np.newaxis], (1,1,self.ns))
+        for i in range(self.ns):
+            feasible_ind = (self.Xmat_ind | ~self.Xmat_ind[i]).all(axis=1)
+            feasible_inds.append(feasible_ind)
+
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
             # Discount factor for discounting V_{t+1}
@@ -253,6 +261,7 @@ class Optimizer:
             # Discount factor for discounting all future incremental costs between t and T
             n_life = np.floor((self.timeline[-1] - self.timeline[t]) / self.selected_df.Life)
             sum_disc_life = n_life if self.delta == 1 else delta_n * (1 - delta_n ** n_life) / (1 - delta_n)
+
             # Compute V_t for each state
             for i in range(self.ns):
                 # Check if the state is possible at all by start year
@@ -260,10 +269,11 @@ class Optimizer:
                     V[i] = np.inf
                     Xt_idx[t, i] = -1  # Use -1 as indicator of null
                     continue
-                # State converted to indicator
-                Xprev_ind = self.Xmat_ind[i]
+
                 # Choose feasible decision variables by definition
-                ind_feasible = (self.Xmat_ind | ~Xprev_ind).all(axis=1)
+                Xprev_ind = self.Xmat_ind[i]
+                ind_feasible = feasible_inds[i]
+
                 # Choose feasible decision variables by start year
                 # if unavailable_groups[t].any():  TODO Temp Bug fix, figure out solution later
                 if t < len(unavailable_groups) and unavailable_groups[t].any():
