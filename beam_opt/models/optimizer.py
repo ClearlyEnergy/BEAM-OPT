@@ -6,7 +6,9 @@
 """
 
 import json
+from typing import Any
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import itertools
 
@@ -62,7 +64,7 @@ class Optimizer:
 
         # Retrieve and store Priority data from complete_data
         priority_results = complete_data.get_priority_chart(bldg_id)
-        self.priority = [*priority_results['priority_chart'].values()][0]
+        self.priority: pd.DataFrame = [*priority_results['priority_chart'].values()][0]
 
         self.total_years = timeline[-1] - timeline[0] + 1
         # if self.total_years!=self.baseline.shape[0]: # I'm not sure whether it's important to return error messages, but the initializer cannot return objects so I raised an exception
@@ -211,40 +213,32 @@ class Optimizer:
         all_indices = np.arange(self.ns, dtype=np.int64)
         Cost_Inc = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost)
 
-        # Precompute feasible states by priority
+
         selected_priority = self.priority.loc[self.selected_groups, self.selected_groups]
         ind_priority = np.ones([self.ns, self.ns], dtype=bool)
         ind_needPrereq = (~selected_priority.isna()).any(axis=0)
-        ind_installed = self.Xmat.astype(bool)
+        ind_installed: np.ndarray[bool] = self.Xmat.astype(bool)
+
+        ind_feasible_list = []
         for i in range(self.ns):
-            subind_unready = ~selected_priority.loc[ind_installed[i], ind_needPrereq].any(axis=0)
-            ind_unready = pd.Series(np.zeros(len(self.selected_groups), dtype=bool), index=self.selected_groups)
-            ind_unready[subind_unready.index[subind_unready]] = True
-            for j in subind_unready.index[subind_unready]:
-                # ind1 is indicator for groups having prerequisites and installed
-                ind1 = ind_installed[:, (self.selected_groups == j)].reshape(-1)
-                # ind2 is indicator for groups that are prerequisites and installed
-                ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
-                ind_priority[i, ind1 & (~ind2)] = False
+            ind_feasible = (self.Xmat_ind | ~self.Xmat_ind[i]).all(axis=1)
+            # Exclude infeasible decision variable by priority
+            ind_feasible_list.append(ind_feasible & ind_priority[i])
+            
+            self._compute_feasible_state(selected_priority, ind_installed, ind_needPrereq, ind_priority, i)
+                
+                
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.df.columns:
             start_years = self.selected_df.groupby('Group').Start_Year.first().values[None, :]
-            unavailable_groups = start_years > self.timeline[:, None]
+            unavailable_groups: npt.NDArray = start_years > self.timeline[:, None]
         else:
-            unavailable_groups = np.repeat(False, len(self.selected_groups))
+            unavailable_groups: npt.NDArray = np.repeat(False, self.T)
 
-        V = np.zeros(self.ns)  # Value function
+        V = np.full((self.ns), np.inf)  # Value function
         Xt_idx = np.zeros([self.T, self.ns], dtype=np.int64)  # Optimal decision for each state
         Vnext = np.zeros(self.ns)  # Terminal value function
-
-
-        # Precalculate feasible decision variables by definition
-        feasible_inds = []
-        # Xmat_extended = np.tile(self.Xmat[:,:,np.newaxis], (1,1,self.ns))
-        for i in range(self.ns):
-            feasible_ind = (self.Xmat_ind | ~self.Xmat_ind[i]).all(axis=1)
-            feasible_inds.append(feasible_ind)
 
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
@@ -272,15 +266,16 @@ class Optimizer:
 
                 # Choose feasible decision variables by definition
                 Xprev_ind = self.Xmat_ind[i]
-                ind_feasible = feasible_inds[i]
-
+                
                 # Choose feasible decision variables by start year
-                # if unavailable_groups[t].any():  TODO Temp Bug fix, figure out solution later
-                if t < len(unavailable_groups) and unavailable_groups[t].any():
-                    ind_feasible = ind_feasible & (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
+                if unavailable_groups[t]:
+                    ind_feasible = ind_feasible_list[i] & (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
+                else:
+                    ind_feasible = ind_feasible_list[i]
+
                 # Exclude infeasible decision variable by priority
                 ind_feasible = ind_feasible & ind_priority[i]
-                # print([self.Xmat[i],ind_priority[i].sum()])
+
                 # Exclude infeasible decision variable by budget
                 Xnew_ind = self.Xmat_ind[ind_feasible] & ~Xprev_ind
                 costs = Xnew_ind @ self.selected_df.Cost
@@ -319,6 +314,25 @@ class Optimizer:
         self.total_cost = V[0]
         return self._forward(self.Xoptimal_ind, scenario)
     
+    def _compute_feasible_state(self,
+                                selected_priority,
+                                ind_installed,
+                                ind_needPrereq,
+                                ind_priority, # mutable
+                                idx,
+    ):
+        """
+        """
+        subind_unready = ~selected_priority.loc[ind_installed[idx], ind_needPrereq].any(axis=0)
+        ind_unready = pd.Series(np.zeros(len(self.selected_groups), dtype=bool), index=self.selected_groups)
+        ind_unready[subind_unready.index[subind_unready]] = True
+        for j in subind_unready.index[subind_unready]:
+            # ind1 is indicator for groups having prerequisites and installed
+            ind1 = ind_installed[:, (self.selected_groups == j)].reshape(-1)
+            # ind2 is indicator for groups that are prerequisites and installed
+            ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
+            ind_priority[idx, ind1 & (~ind2)] = False
+    
     def _forward(self, scenario_selection, scenario='Consumption'):
         """
         Perform forward calculation of energy reductions given a configuration of scenario installations.
@@ -342,7 +356,15 @@ class Optimizer:
         
         return {'solution': self.Xoptimal, 'objective': self.total_cost}
 
-    def optimize(self, scenario='Consumption', target_num=15, discard_thres=1e-3, max_iter=None, scenario_selection=None, scenario_costs_savings=None, measure_df=None):
+    def optimize(self,
+                 scenario='Consumption',
+                 target_num=15,
+                 discard_thres=1e-3,
+                 max_iter=None,
+                 scenario_selection=None,
+                 scenario_costs_savings=None,
+                 measure_df=None,
+    ):
         lookup = self.lookups[scenario]
 
         if max_iter is None:
