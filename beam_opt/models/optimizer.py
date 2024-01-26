@@ -196,7 +196,7 @@ class Optimizer:
 
     def _optimize(self, scenario='Consumption', target_only=False):
         """
-        Note: All cashflows are computed up to terminal time
+        NOTE: All cashflows are computed up to terminal time
         The argument target_only is not really used. I just set it here in case someone wants to know what if I don't
         care about the cost and saving cashflows, but only want to see if I can meet the target within budget, priority
         and start year constraints
@@ -204,27 +204,30 @@ class Optimizer:
         lookup = self.lookups[scenario]
         excess = getattr(self.baseline, lookup['optimize']).values[None, :] - getattr(self, lookup['reduction'])[:, None]
         excess = excess - np.array(getattr(self, lookup['target']))[None, :]
-
         time_diff: np.ndarray = np.diff(self.timeline)
         excess_payment: np.ndarray[np.float_] = np.zeros([self.ns, self.total_years])
         excess_payment[excess > 0] = excess[excess > 0] * self.penalty
-
-        delta_n = self.delta ** self.selected_df.Life
-        all_indices = np.arange(self.ns, dtype=np.int64)
-        Cost_Inc = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost)
-
-        selected_priority: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
+        delta_n: np.ndarray[np.float64] = (self.delta ** self.selected_df.Life).to_numpy()
+        all_indices: np.ndarray[np.int64] = np.arange(self.ns, dtype=np.int64)
+        cost_inc: np.ndarray[np.int64] = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost).to_numpy()
+        selected_priority_df: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
+        selected_priority_np: np.ndarray = selected_priority_df.to_numpy()
         ind_priority: np.ndarray[np.bool_] = np.ones([self.ns, self.ns], dtype=bool)
-        ind_needPrereq = (~selected_priority.isna()).any(axis=0)
+        ind_need_prereq: np.ndarray[np.bool_] = (~selected_priority_df.isna()).any(axis=0).to_numpy()
         ind_installed: np.ndarray[np.bool_] = self.Xmat.astype(bool)
 
-        ind_feasible_list = []
+        # precompute feasibility
+        ind_feasible_list: list[list[bool]] = []
         for i in range(self.ns):
-            ind_feasible = (self.Xmat_ind | ~self.Xmat_ind[i]).all(axis=1)
-            # Exclude infeasible decision variable by priority
-            ind_feasible_list.append(ind_feasible & ind_priority[i])
-            
-            self._compute_feasible_state(selected_priority, ind_installed, ind_needPrereq, ind_priority, i)
+            ind_feasible = self.Xmat_ind | ~(self.Xmat_ind[i])
+            ind_feasible = ind_feasible.all(axis=1) & ind_priority[i] # Exclude infeasible decision variable by priority
+            ind_feasible_list.append(ind_feasible)
+            self._compute_feasible_state(
+                        selected_priority_np, \
+                        ind_installed, \
+                        ind_need_prereq, \
+                        ind_priority, \
+                        i)
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.df.columns:
@@ -233,12 +236,14 @@ class Optimizer:
         else:
             unavailable_groups: npt.NDArray = np.repeat(False, self.T)
 
-        V = np.full((self.ns), np.inf)  # Value function
-        Xt_idx = np.zeros([self.T, self.ns], dtype=np.int64)  # Optimal decision for each state
-        Vnext = np.zeros(self.ns)  # Terminal value function
+        V: np.ndarray[np.float32] = np.full((self.ns), np.inf, np.float32)  # Value function
+        Xt_idx: np.ndarray[np.int64] = np.full([self.T, self.ns], -1, dtype=np.int64)  # Optimal decision for each state
+        Vnext: np.ndarray[np.float32] = np.zeros(self.ns, dtype=np.float32)  # Terminal value function
 
-        # Backward recursion
         first_year = self.timeline[0]
+        cost_values: np.ndarray[np.float64] = self.selected_df.Cost.to_numpy()
+        
+        # Backward recursion
         for t in range(self.T - 1, -1, -1):
             # Discount factor for discounting V_{t+1}
             disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
@@ -250,11 +255,20 @@ class Optimizer:
             else:
                 sum_disc = (1 - self.delta ** time_diff[t]) / (1 - self.delta)
             y_past = time_diff[:t].sum() if t > 0 else 0
+            
             # Discount factor for discounting all future incremental costs between t and T
             n_life = np.floor((self.timeline[-1] - self.timeline[t]) / self.selected_df.Life)
-            sum_disc_life = n_life if self.delta == 1 else delta_n * (1 - delta_n ** n_life) / (1 - delta_n)
+            if self.delta == 1:
+                sum_disc_life = n_life
+            else:
+                sum_disc_life= delta_n * (1 - delta_n ** n_life) / (1 - delta_n)
 
+            sum_disc_life: np.ndarray[np.float64] = sum_disc_life.to_numpy()
+            discounted_cost = cost_inc * sum_disc_life
+            budget = self.budget[t]
             unavail_factors = (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
+            unavailable_group_t = unavailable_groups[t - 1]
+
             if t < self.T - 1:
                 current_time_range = range(time_diff[t] - 1, -1, -1)
             else:
@@ -265,12 +279,8 @@ class Optimizer:
             # Compute V_t for each state
             for i in range(self.ns):
                 # Check if the state is possible at all by start year
-                if t > 0 and (self.Xmat[i, unavailable_groups[t - 1]] > 0).any():
-                    Xt_idx[t, i] = -1  # Use -1 as indicator of null
+                if t > 0 and (self.Xmat[i, unavailable_group_t] > 0).any():
                     continue
-
-                # Choose feasible decision variables by definition
-                Xprev_ind = self.Xmat_ind[i]
                 
                 # Choose feasible decision variables by start year
                 if unavailable_groups[t]:
@@ -278,31 +288,28 @@ class Optimizer:
                 else:
                     ind_feasible = ind_feasible_list[i]
 
-                # Exclude infeasible decision variable by priority
+                # Exclude infeasible decision variables by priority and budget
                 ind_feasible = ind_feasible & ind_priority[i]
-
-                # Exclude infeasible decision variable by budget
-                Xnew_ind = self.Xmat_ind[ind_feasible] & ~Xprev_ind
-                costs = Xnew_ind @ self.selected_df.Cost
-                ind_cost = (costs <= self.budget[t])
+                Xnew_ind = self.Xmat_ind[ind_feasible] & ~self.Xmat_ind[i]
+                costs = Xnew_ind @ cost_values
+                ind_cost = (costs <= budget)
                 if not ind_cost.any():
-                    Xt_idx[t, i] = -1
                     continue
 
                 # Index of feasible decision variables in self.Xmat (self.Xmat_ind)
-                idx_feasible = all_indices[ind_feasible][ind_cost]
+                index_feasible = all_indices[ind_feasible][ind_cost]
                 # Compute V_t values
-                obj_vals = excess_payment[idx_feasible, time_span]
+                obj_vals = excess_payment[index_feasible, time_span]
                 
                 for y in current_time_range:
-                    obj_vals = excess_payment[idx_feasible, y_past + y] + self.delta * obj_vals
+                    obj_vals = excess_payment[index_feasible, y_past + y] + self.delta * obj_vals
                 
-                obj_vals = obj_vals + disc * Vnext[idx_feasible]
+                obj_vals = obj_vals + disc * Vnext[index_feasible]
                 if not target_only:
-                    costs_inc = self.Xmat_ind[idx_feasible] @ (Cost_Inc * sum_disc_life)  # Cost for replacement
-                    obj_vals = obj_vals + costs[ind_cost] + costs_inc - sum_disc * self.annual_bill_saving[idx_feasible]
+                    costs_inc = self.Xmat_ind[index_feasible] @ (discounted_cost)  # Cost for replacement
+                    obj_vals = obj_vals + costs[ind_cost] + costs_inc - sum_disc * self.annual_bill_saving[index_feasible]
                 idx_min = obj_vals.argmin()
-                Xt_idx[t, i] = idx_feasible[idx_min]
+                Xt_idx[t, i] = index_feasible[idx_min]
                 V[i] = obj_vals[idx_min]
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
@@ -322,19 +329,15 @@ class Optimizer:
     def _compute_feasible_state(self,
                                 selected_priority,
                                 ind_installed,
-                                ind_needPrereq,
+                                ind_need_prereq,
                                 ind_priority, # mutable
                                 idx,
     ):
-        """
-        """
-        subind_unready = ~selected_priority.loc[ind_installed[idx], ind_needPrereq].any(axis=0)
-        ind_unready = pd.Series(np.zeros(len(self.selected_groups), dtype=bool), index=self.selected_groups)
-        ind_unready[subind_unready.index[subind_unready]] = True
-        for j in subind_unready.index[subind_unready]:
-            # ind1 is indicator for groups having prerequisites and installed
+        subind_unready = ~selected_priority[ind_installed[idx]][:,ind_need_prereq].any(axis=0)
+        for j in np.where(subind_unready)[0]:
+            # groups having prerequisites and installed
             ind1 = ind_installed[:, (self.selected_groups == j)].reshape(-1)
-            # ind2 is indicator for groups that are prerequisites and installed
+            # groups that are prerequisites and installed
             ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
             ind_priority[idx, ind1 & (~ind2)] = False
     
