@@ -37,7 +37,9 @@ def validate_complete_data(complete_data: CompleteData, ids):
     if baseline_columns_diff:
         test_for_nan = False
         errors.append('Baseline data is missing columns: %s' % ', '.join(baseline_columns_diff))
-    measure_columns = list(complete_data.measure_data.columns)  # TODO Convert this to return just the DF in all locations
+
+    # TODO: Convert this to return just the DF in all locations
+    measure_columns = list(complete_data.measure_data.columns)
     measure_columns_diff = list(set(MEASURE_VALIDATION_COLUMNS) - set(measure_columns))
     if measure_columns_diff:
         test_for_nan = False
@@ -62,7 +64,7 @@ def validate_complete_data(complete_data: CompleteData, ids):
             errors.append('Missing data in one or more Measures: ' + ', '.join(cols_with_nans))
 
         sub_df = measures_df.loc[measures_df.Building.notna(),
-                                 ['Annual_Saving', 'Total_CO2', 'Electricity_Saving',
+                                 ['Annual_Saving', 'Electricity_Saving',
                                   'Gas_Saving', 'Electricity_Bill_Saving', 'Gas_Bill_Saving']]
         mapping = {'Annual_Saving': 'annual_cost_savings',
                    'Total_CO2': 'annual_electricity_energy/annual_natural_gas_energy',
@@ -76,7 +78,8 @@ def validate_complete_data(complete_data: CompleteData, ids):
         has_nan = [False for i in range(len(sub_df.columns))]
         for row in range(len(nan_values)):
             for col in range(len(nan_values[row])):
-                if nan_values[row, col]: has_nan[col] = True
+                if nan_values[row, col]:
+                    has_nan[col] = True
 
         if sub_df.isna().values.any():
             cols_with_nans = sub_df.columns[has_nan].tolist()
@@ -137,3 +140,4 @@ def post_validate_parameters(optimizer: Optimizer, scenario):
     if not hasattr(optimizer, lookup['target']):
         errors.append('Must set Target before calling Optimization')
     return errors if errors else None
+
