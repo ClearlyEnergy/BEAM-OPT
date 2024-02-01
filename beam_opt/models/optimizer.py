@@ -169,7 +169,7 @@ class Optimizer:
         return {'status': 'success',
                 'message': ''}
 
-    def _prep(self):
+    def _prep(self, scenario):
         # State matrix
         indices_by_group = self.selected_df.groupby("Group").Index.apply(list)
         indices_by_group = [[0] + indices for indices in indices_by_group]
@@ -203,6 +203,13 @@ class Optimizer:
             self.Xmat_ind[i, marks[Xvec > 0] + Xvec[Xvec > 0] - 1] = 1
 
         # Pre-computation
+        lookup = self.lookups[scenario]
+        reductions_by_t = []
+        for t, _ in enumerate(self.timeline):
+            reduction_at_t = self.Xmat_ind @ self.selected_df[lookup['data'] + ' ' + str(self.timeline[t])]
+            reductions_by_t.append(reduction_at_t)
+
+        setattr(self, lookup['reduction'], reductions_by_t)
         self.annual_bill_saving = self.Xmat_ind @ self.selected_df.Annual_Saving
 
     def _optimize(self, scenario='Consumption', target_only=False):
@@ -254,6 +261,14 @@ class Optimizer:
 
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
+            baseline_usage = getattr(self.baseline, lookup['optimize']).values[None, :]
+            current_usage = getattr(self, lookup['reduction'])[t][:, None]
+            target_usage = np.array(getattr(self, lookup['target']))[None, :]
+            excess = baseline_usage - current_usage - target_usage
+
+            excess_payment = np.zeros([self.ns, self.total_years])
+            excess_payment[excess > 0] = excess[excess > 0] * self.penalty
+
             # Discount factor for discounting V_{t+1}
             disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
 
@@ -309,15 +324,6 @@ class Optimizer:
 
                 # Index of feasible decision variables in self.Xmat (self.Xmat_ind)
                 index_feasible = all_indices[ind_feasible][ind_cost]
-
-                self.annual_energy_saving = self.Xmat_ind @ self.selected_df['Total_Saving ' + str(self.timeline[t])]
-                self.annual_emission_reduction = self.Xmat_ind @ self.selected_df['Total_CO2 ' + str(self.timeline[t])]
-
-                excess = getattr(self.baseline, lookup['optimize']).values[None, :] - getattr(self, lookup['reduction'])[:, None]
-                excess = excess - np.array(getattr(self, lookup['target']))[None, :]
-
-                excess_payment = np.zeros([self.ns, self.total_years])
-                excess_payment[excess > 0] = excess[excess > 0] * self.penalty
 
                 # Compute V_t values
                 obj_vals = excess_payment[index_feasible, time_span]
@@ -473,7 +479,7 @@ class Optimizer:
 
         # Begin optimization
         for i in range(max_iter):
-            self._prep()
+            self._prep(scenario)
             if scenario_selection:
                 self.df = measure_df  # unfiltered dataframe of all scenarios for this property
                 self._forward(scenario_selection, scenario)
