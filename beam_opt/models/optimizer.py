@@ -261,13 +261,8 @@ class Optimizer:
 
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
-            baseline_usage = getattr(self.baseline, lookup['optimize']).values[None, :]
-            current_usage = getattr(self, lookup['reduction'])[t][:, None]
-            target_usage = np.array(getattr(self, lookup['target']))[None, :]
-            excess = baseline_usage - current_usage - target_usage
-
-            excess_payment = np.zeros([self.ns, self.total_years])
-            excess_payment[excess > 0] = excess[excess > 0] * self.penalty
+            time_span = self.timeline[t] - first_year
+            excess_payment: np.ndarray = self._compute_excess_payment(scenario, t)
 
             # Discount factor for discounting V_{t+1}
             disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
@@ -299,7 +294,6 @@ class Optimizer:
             else:
                 current_time_range = range(0)
 
-            time_span = self.timeline[t] - first_year
 
             # Compute V_t for each state
             for i in range(self.ns):
@@ -327,7 +321,6 @@ class Optimizer:
 
                 # Compute V_t values
                 obj_vals = excess_payment[index_feasible, time_span]
-
                 for y in current_time_range:
                     obj_vals = excess_payment[index_feasible, y_past + y] + self.delta * obj_vals
 
@@ -352,7 +345,8 @@ class Optimizer:
         self.Xoptimal = self.Xmat[Xstar_idx]
         self.Xoptimal_ind = self.Xmat_ind[Xstar_idx]
         self.total_cost = V[0]
-        return self._forward(self.Xoptimal_ind, scenario)
+        result = self._calculate_forward_reduction(self.Xoptimal_ind, scenario)
+        return result
 
     def _compute_feasible_state(self,
                                 selected_priority,
@@ -360,6 +354,8 @@ class Optimizer:
                                 ind_need_prereq,
                                 ind_priority,  # mutable
                                 idx):
+        """
+        """
         subind_unready = ~selected_priority[ind_installed[idx]][:, ind_need_prereq].any(axis=0)
         for j in np.where(subind_unready)[0]:
             # groups having prerequisites and installed
@@ -367,8 +363,29 @@ class Optimizer:
             # groups that are prerequisites and installed
             ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
             ind_priority[idx, ind1 & (~ind2)] = False
+    
 
-    def _forward(self, scenario_selection, scenario='Consumption'):
+    def _compute_excess_payment(self, scenario, time):
+        """
+        :param str scenario:
+        :param int time:
+        :return NDArray:
+        """
+        lookup = self.lookups[scenario]
+        baseline_usage = getattr(self.baseline, lookup['optimize']).values[None, :]
+        current_reduction= getattr(self, lookup['reduction'])[time][:, None]
+        current_usage = baseline_usage - current_reduction
+        target_usage = np.array(getattr(self, lookup['target']))[None, :]
+
+        excess = baseline_usage - current_reduction - target_usage
+        excess_payment = np.zeros([self.ns, self.total_years])
+        # breakpoint()
+        excess_payment[excess > 0] = excess[excess > 0] * self.penalty
+        # excess_payment = np.where(current_usage > 0, excess_payment, np.inf)
+        return excess_payment
+
+
+    def _calculate_forward_reduction(self, scenario_selection, scenario='Consumption'):
         """
         Perform forward calculation of energy reductions given a configuration of scenario installations.
         """
@@ -553,8 +570,7 @@ class Optimizer:
 
         self.Xoptimal = Xbase
         self.Xoptimal_ind = np.zeros([self.T, self.measure_df.shape[0]], dtype=bool)
-        from celery.contrib import rdb
-        rdb.set_trace()
+
         for t in range(self.T):
             for i in range(Xbase.shape[1]):
                 if Xbase[t, i] > 0:
