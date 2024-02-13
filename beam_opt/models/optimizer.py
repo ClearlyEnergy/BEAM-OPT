@@ -13,7 +13,7 @@ import itertools
 
 from beam_opt.models.data_container import CompleteData
 
-    
+ACCEPT_FIRST_SOLUTION = True
 LOOKUP = {
         'Consumption': {
             'data': 'Total_Saving',
@@ -376,25 +376,23 @@ class Optimizer:
         time_diff = np.diff(self.timeline)
         year_idx = time_diff[:(t+1)].sum()
 
-        baseline_elec = getattr(self.baseline, LOOKUP[scenario]['baseline_electricity']).values[year_idx]
+        # baseline_elec = getattr(self.baseline, LOOKUP[scenario]['baseline_electricity']).values[year_idx]
         baseline_gas = getattr(self.baseline, LOOKUP[scenario]['baseline_gas']).values[year_idx]
 
-        elec_col_label = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[t])
-        elec_reduction = getattr(self.measure_df, elec_col_label ).to_numpy()
-        elec_reduction = np.sum(self.Xmat_ind * elec_reduction, axis=1)
+        # elec_col_label = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[t])
+        # elec_reduction = getattr(self.measure_df, elec_col_label ).to_numpy()
+        # elec_reduction = np.sum(self.Xmat_ind * elec_reduction, axis=1)
 
         gas_col_label = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[t])
         gas_reduction = getattr(self.measure_df, gas_col_label).to_numpy()
         gas_reduction = np.sum(self.Xmat_ind * gas_reduction, axis=1)
 
         gas_usage = baseline_gas - gas_reduction
-        # gas_usage = np.where(gas_usage > 0, gas_usage, 0) # cannot have negative gas usage
-        elec_usage = baseline_elec - elec_reduction
-        # elec_usage = np.where(elec_usage > 0, elec_usage, 0)
-        
         gas_delta = gas_usage - gas_usage[state_i]
-        elec_delta = elec_usage - elec_usage[state_i]
         reduced_ind = ind_feasible if (gas_usage[state_i] > 0) else ind_feasible & (gas_delta == 0)
+        # elec_usage = baseline_elec - elec_reduction
+        # elec_delta = elec_usage - elec_usage[state_i]
+        
         # reduced_indices = reduced_indices if (elec_usage[state_i] > 0) else (ind_feasible & (elec_delta == 0)) | reduced_indices
         return reduced_ind
 
@@ -405,14 +403,12 @@ class Optimizer:
         :param int time:
         :return NDArray:
         """
-
         baseline_usage = getattr(self.baseline, LOOKUP[scenario]['optimize']).values[None, :]
         current_reduction = getattr(self, LOOKUP[scenario]['reduction'])[time][:, None]
 
         target_usage = np.array(getattr(self, LOOKUP[scenario]['target']))[None, :]
         excess = baseline_usage - current_reduction - target_usage
         
-        # excess_payment = np.zeros([self.ns, self.total_years])
         excess_payment = np.where(excess > 0, excess, 0)
         excess_payment = excess_payment * self.penalty
         return excess_payment
@@ -465,7 +461,6 @@ class Optimizer:
         top_measures_by_group = self.measure_df.groupby('Group', group_keys=False)[first_year_data]
         df_base = self.measure_df.loc[top_measures_by_group.idxmax().values]
         df_base = df_base.sort_values(by=first_year_data)
-
         time_diff = np.diff(self.timeline)
 
         Xbase = np.zeros([self.T, df_base.shape[0]], dtype=int)  # base configuration
@@ -557,8 +552,9 @@ class Optimizer:
             self.solution = pd.DataFrame(sol)
             # If the suggested solution is no inferior to the base case, return as solution found
             # If a preconfigured scenario selection is provided, always return recalculated solution
-            if scenario_selection or self.total_cost < obj_base:
+            if scenario_selection or self.total_cost < obj_base or ACCEPT_FIRST_SOLUTION:
                 return {'status': 'success', 'message': 'Solution found'}
+            
             # If the suggested optimized solution is strictly worse than the base case, replace one candidate measure
             # with an un-preselected one and redo optimization
 
