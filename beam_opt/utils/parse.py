@@ -375,11 +375,13 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
     df = pd.DataFrame(measures, columns=MEASURE_DF_COLUMNS)
 
     # Discard expensive measures with the same effect
-    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Annual_Saving']).Cost.idxmin().fillna(0).astype(int)]
+    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Annual_Saving', 'Category']).Cost
+                .idxmin().fillna(0).astype(int)]
     df.sort_index(inplace=True)
 
     # Discard less effective measures with the same cost
-    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Cost']).Annual_Saving.idxmax().fillna(0).astype(int)]
+    df = df.loc[df.fillna(np.inf).groupby(['Building', 'Cost', 'Category']).Annual_Saving
+                .idxmax().fillna(0).astype(int)]
     df.sort_index(inplace=True)
 
     # ###  Build dataframe with base information about the property
