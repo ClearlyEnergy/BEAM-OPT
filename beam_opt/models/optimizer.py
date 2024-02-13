@@ -15,29 +15,30 @@ from beam_opt.models.data_container import CompleteData
 
 ACCEPT_FIRST_SOLUTION = True
 LOOKUP = {
-        'Consumption': {
-            'data': 'Total_Saving',
-            'target': 'consumption_target',
-            'optimize': 'Total_Consumption',
-            'level': 'consumption_level',
-            'reduction': 'annual_energy_saving',
-            'electricity': 'Electricity_Saving',
-            'gas': 'Gas_Saving',
-            'baseline_electricity': 'Electricity_Consumption',
-            'baseline_gas': 'Gas_Consumption',
-        },
-        'Emission': {
-            'data': 'Total_CO2',
-            'target': 'emission_target',
-            'optimize': 'Total_CO2',
-            'level': 'emission_level',
-            'reduction': 'annual_emission_reduction',
-            'electricity': 'Electricity_CO2',
-            'gas': 'Gas_CO2',
-            'baseline_electricity': 'Electricity_CO2',
-            'baseline_gas': 'Gas_CO2',
-        }
+    'Consumption': {
+        'data': 'Total_Saving',
+        'target': 'consumption_target',
+        'optimize': 'Total_Consumption',
+        'level': 'consumption_level',
+        'reduction': 'annual_energy_saving',
+        'electricity': 'Electricity_Saving',
+        'gas': 'Gas_Saving',
+        'baseline_electricity': 'Electricity_Consumption',
+        'baseline_gas': 'Gas_Consumption',
+    },
+    'Emission': {
+        'data': 'Total_CO2',
+        'target': 'emission_target',
+        'optimize': 'Total_CO2',
+        'level': 'emission_level',
+        'reduction': 'annual_emission_reduction',
+        'electricity': 'Electricity_CO2',
+        'gas': 'Gas_CO2',
+        'baseline_electricity': 'Electricity_CO2',
+        'baseline_gas': 'Gas_CO2',
     }
+}
+
 
 class Optimizer:
 
@@ -113,32 +114,31 @@ class Optimizer:
         # Set target attribute
         target_df = pd.DataFrame({'Target': target, 'Year': self.timeline})
         target_df = target_df.merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
-        setattr(self, LOOKUP[scenario]['target'], target_df.Target * 1000) # target_df.Target is in mtCO2e, convert to kg
+        setattr(self, LOOKUP[scenario]['target'], target_df.Target * 1000)  # target_df.Target is in mtCO2e, convert to kg
 
         return {'status': 'success', 'message': ''}
 
     def _preselect(self, target_num=15, scenario='Consumption', discard_thres=1e-3):
         # Discard measures with negative electricity and gas savings
         for time in self.timeline:
-            self.selected_df = self.measure_df[(self.measure_df[col_label_by_year(LOOKUP[scenario]['electricity'],time)] >= 0) |
-                                       self.measure_df[col_label_by_year(LOOKUP[scenario]['gas'],time)] >= 0]
-
+            self.selected_df = self.measure_df[(self.measure_df[col_label_by_year(LOOKUP[scenario]['electricity'], time)] >= 0) |
+                                               self.measure_df[col_label_by_year(LOOKUP[scenario]['gas'], time)] >= 0]
 
         # Discard measures whose annual saving is less than discard_thres * baseline expenditure
         if self.selected_df.shape[0] > target_num:
             self.selected_df = self.selected_df.loc[self.selected_df.Annual_Saving >=
                                                     (discard_thres * self.baseline.Annual_Bill.values.min())]
-        
+
         # Select measures by cost efficiency within each exclusion group
         if self.selected_df.shape[0] > target_num:
             self.selected_df = self.selected_df.groupby('Group', group_keys=False).apply(
                 lambda x: pick_cost_efficiency(x, self.timeline, scenario))
-        
+
         # Select measures by saving/cost ratios
         ratio = np.empty(target_num)
         if self.selected_df.shape[0] > target_num:
             # TODO: with Total_CO2 being expanded, how to select? Using initial year as temp solution
-            value = self.selected_df[col_label_by_year(LOOKUP[scenario]['data'],self.timeline[0])] * self.selected_df.Life
+            value = self.selected_df[col_label_by_year(LOOKUP[scenario]['data'], self.timeline[0])] * self.selected_df.Life
             ratio = value / self.selected_df.Cost
             ratio = ratio.sort_values(ascending=False).dropna()[:target_num]
             self.selected_df = self.selected_df.loc[ratio.index]
@@ -153,7 +153,7 @@ class Optimizer:
                 if len(prereq_group) > 0 and not self.selected_df.Group.isin(prereq_group).any():
                     missing_inds = self.measure_df.Group.isin(prereq_group)
                     # TODO: expanded data handled the same as above
-                    ratio_missing = self.measure_df[col_label_by_year(LOOKUP[scenario]['data'],self.timeline[0])][missing_inds]
+                    ratio_missing = self.measure_df[col_label_by_year(LOOKUP[scenario]['data'], self.timeline[0])][missing_inds]
                     ratio_missing = ratio_missing * self.measure_df.Life[missing_inds]
                     ratio_missing = (ratio_missing / self.measure_df.Cost[missing_inds]).sort_values(ascending=False).dropna()
                     if self.selected_df.Group[ratio.index[pos]] == j:
@@ -203,7 +203,7 @@ class Optimizer:
         # Pre-computation
         reductions_by_t = []
         for t, _ in enumerate(self.timeline):
-            reduction_at_t = self.Xmat_ind @ self.selected_df[col_label_by_year(LOOKUP[scenario]['data'],self.timeline[t])]
+            reduction_at_t = self.Xmat_ind @ self.selected_df[col_label_by_year(LOOKUP[scenario]['data'], self.timeline[t])]
             reductions_by_t.append(reduction_at_t)
 
         setattr(self, LOOKUP[scenario]['reduction'], reductions_by_t)
@@ -309,7 +309,7 @@ class Optimizer:
                 Xnew_ind = self.Xmat_ind[ind_feasible] & ~self.Xmat_ind[i]
                 cost_per_state = Xnew_ind @ cost_values
                 ind_cost = (cost_per_state <= budget)
-                
+
                 if not ind_cost.any():
                     continue
 
@@ -333,7 +333,7 @@ class Optimizer:
                 V[i] = obj_vals[idx_min]
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
-                
+
             Vnext = V
 
         # Forward recursion
@@ -363,7 +363,7 @@ class Optimizer:
             # groups that are prerequisites and installed
             ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
             ind_priority[idx, ind1 & (~ind2)] = False
-    
+
     def _exclude_redundant_variables(self, scenario, ind_feasible, t, state_i):
         """
         Remove feasible states when the transition does not reduce any fuel
@@ -374,7 +374,7 @@ class Optimizer:
         :param state_i: state index from which transition may occur
         """
         time_diff = np.diff(self.timeline)
-        year_idx = time_diff[:(t+1)].sum()
+        year_idx = time_diff[:(t + 1)].sum()
 
         # baseline_elec = getattr(self.baseline, LOOKUP[scenario]['baseline_electricity']).values[year_idx]
         baseline_gas = getattr(self.baseline, LOOKUP[scenario]['baseline_gas']).values[year_idx]
@@ -392,10 +392,9 @@ class Optimizer:
         reduced_ind = ind_feasible if (gas_usage[state_i] > 0) else ind_feasible & (gas_delta == 0)
         # elec_usage = baseline_elec - elec_reduction
         # elec_delta = elec_usage - elec_usage[state_i]
-        
+
         # reduced_indices = reduced_indices if (elec_usage[state_i] > 0) else (ind_feasible & (elec_delta == 0)) | reduced_indices
         return reduced_ind
-
 
     def _compute_excess_payment(self, scenario, time):
         """
@@ -408,11 +407,10 @@ class Optimizer:
 
         target_usage = np.array(getattr(self, LOOKUP[scenario]['target']))[None, :]
         excess = baseline_usage - current_reduction - target_usage
-        
+
         excess_payment = np.where(excess > 0, excess, 0)
         excess_payment = excess_payment * self.penalty
         return excess_payment
-
 
     def _calculate_forward_reduction(self, scenario_selection, scenario='Consumption'):
         """
@@ -424,7 +422,7 @@ class Optimizer:
             scenarios_for_t = scenario_selection[t]
             for name in ['data', 'electricity', 'gas']:
                 store_as = scenario if name == 'data' else name.capitalize()
-                data_by_t = self.measure_df[col_label_by_year(LOOKUP[scenario][name],time)]
+                data_by_t = self.measure_df[col_label_by_year(LOOKUP[scenario][name], time)]
                 data[store_as].append((scenarios_for_t @ data_by_t.values.reshape([-1, 1])).reshape(-1)[0])
         scenario_df = pd.DataFrame(data).merge(self.timeline_df, on='Year', how='right')
         scenario_df = scenario_df.fillna(method='ffill').set_index('Year')
@@ -453,7 +451,7 @@ class Optimizer:
 
         # Expand Elec/NatGas and Total C02/Savings column of lists into separate columns
         for column in [LOOKUP[scenario]['electricity'], LOOKUP[scenario]['gas'], 'Total_CO2', 'Total_Saving']:
-            expanded_cols = [col_label_by_year(column,time) for time in self.timeline]
+            expanded_cols = [col_label_by_year(column, time) for time in self.timeline]
             self.measure_df[expanded_cols] = pd.DataFrame(self.measure_df[column].tolist(), index=self.measure_df.index)
 
         # Compute base scenario (install measures with maximal reducing power subject to budget constraint) at year 0
@@ -469,7 +467,6 @@ class Optimizer:
         Cost_Inc = df_base.Cost_Incremental.fillna(df_base.Cost)
         self._preselect(target_num, scenario, discard_thres)
         delta_n = self.delta ** self.selected_df.Life
-
 
         baseline_optimize = getattr(self.baseline, LOOKUP[scenario]['optimize'])
         baseline_target = getattr(self, LOOKUP[scenario]['target'])
@@ -554,7 +551,7 @@ class Optimizer:
             # If a preconfigured scenario selection is provided, always return recalculated solution
             if scenario_selection or self.total_cost < obj_base or ACCEPT_FIRST_SOLUTION:
                 return {'status': 'success', 'message': 'Solution found'}
-            
+
             # If the suggested optimized solution is strictly worse than the base case, replace one candidate measure
             # with an un-preselected one and redo optimization
 
@@ -658,7 +655,7 @@ class Optimizer:
         for year_index, set_of_measures in enumerate(measures):
             set_of_measures_df = self.measure_df[self.measure_df['Identifier'].isin(set_of_measures)]
 
-            elec_col = col_label_by_year(LOOKUP[scenario]['electricity'],self.timeline[year_index])
+            elec_col = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[year_index])
             gas_col = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[year_index])
 
             data['electricity_cycle_reduction'][year_index] = set_of_measures_df[elec_col].sum()
@@ -702,5 +699,6 @@ def pick_cost_efficiency(group_df, timeline, scenario):
 
     return group_df.loc[record[:index]]
 
+
 def col_label_by_year(col, year):
-            return col + ' ' + str(year)
+    return col + ' ' + str(year)
