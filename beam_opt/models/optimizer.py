@@ -15,7 +15,7 @@ import itertools
 from beam_opt.models.data_container import CompleteData
 
 LOGGER = logging.getLogger(__name__)
-ACCEPT_FIRST_SOLUTION = False
+ACCEPT_FIRST_SOLUTION = True
 LOOKUP = {
     'Consumption': {
         'data': 'Total_Saving',
