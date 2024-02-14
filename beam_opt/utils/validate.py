@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from beam_opt.models.data_container import CompleteData
-from beam_opt.models.optimizer import Optimizer
+from beam_opt.models.optimizer import Optimizer, LOOKUP
 
 BASELINE_VALIDATION_COLUMNS = ['Annual_Bill', 'Electricity_CO2', 'Gas_CO2', 'Total_CO2', 'Electricity_Consumption',
                                'Gas_Consumption', 'Electricity_Bill', 'Gas_Bill']
@@ -112,8 +112,8 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
     target_df = pd.DataFrame({'Target': target, 'Year': optimizer.timeline}
                              ).merge(timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
 
-    if scenario in optimizer.lookups:
-        lookup = optimizer.lookups[scenario]
+    if scenario in LOOKUP:
+        lookup = LOOKUP[scenario]
         if np.isinf(penalty):
             # Check whether target is achievable
             target = target_df.Target * optimizer.baseline[lookup['optimize']].iloc[0]
@@ -135,7 +135,7 @@ def post_validate_parameters(optimizer: Optimizer, scenario):
     """
     Check that consumption/emission targets were set sucessfully
     """
-    lookup = optimizer.lookups[scenario]
+    lookup = LOOKUP[scenario]
     errors = []
     if not hasattr(optimizer, lookup['target']):
         errors.append('Must set Target before calling Optimization')
