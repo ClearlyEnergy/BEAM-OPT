@@ -290,6 +290,8 @@ class Optimizer:
             else:
                 current_time_range = range(0)
 
+            gas_usage = self._compute_gas_usage(scenario, t, time_diff)
+
             # Compute V_t for each state
             for i in range(self.ns):
                 # Check if the state is possible at all by start year
@@ -304,7 +306,7 @@ class Optimizer:
 
                 # Exclude infeasible decision variables by priority, budget, reduction
                 ind_feasible = ind_feasible & ind_priority[i]
-                ind_feasible = self._exclude_redundant_variables(scenario, ind_feasible, t, i)
+                ind_feasible = self._exclude_redundant_variables(ind_feasible, i, gas_usage)
 
                 Xnew_ind = self.Xmat_ind[ind_feasible] & ~self.Xmat_ind[i]
                 cost_per_state = Xnew_ind @ cost_values
@@ -364,26 +366,37 @@ class Optimizer:
             ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
             ind_priority[idx, ind1 & (~ind2)] = False
 
-    def _exclude_redundant_variables(self, scenario, ind_feasible, t, state_i):
+    def _exclude_redundant_variables(self, ind_feasible, state_i, gas_usage):
         """
         Remove feasible states when the transition does not reduce any fuel
         that state_i has not entirely reduced.
 
         :param ind_feasible: decision variables known to be feasible from state_i
-        :param t: index of current period
         :param state_i: state index from which transition may occur
+        :param gas_usage: gas usage per state (after reduction applied)
         """
-        time_diff = np.diff(self.timeline)
-        year_idx = time_diff[:(t + 1)].sum()
 
+        gas_delta = gas_usage - gas_usage[state_i]
+        if gas_usage[state_i] > 0:
+            return ind_feasible
+        else:
+            return ind_feasible & (gas_delta == 0)
+
+    def _compute_gas_usage(self, scenario, t, time_diff):
+        """
+        Precompute gas usage for each state in given year.
+
+        :param str scenario:
+        :param int t: index of time period
+        :param time_diff: list of difference in time between periods
+        """
+        year_idx = time_diff[:(t + 1)].sum()
         baseline_gas = getattr(self.baseline, LOOKUP[scenario]['baseline_gas']).values[year_idx]
         gas_col_label = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[t])
         gas_reduction = getattr(self.measure_df, gas_col_label).to_numpy()
         gas_reduction = np.sum(self.Xmat_ind * gas_reduction, axis=1)
         gas_usage = baseline_gas - gas_reduction
-        gas_delta = gas_usage - gas_usage[state_i]
-        reduced_ind = ind_feasible if (gas_usage[state_i] > 0) else ind_feasible & (gas_delta == 0)
-        return reduced_ind
+        return gas_usage
 
     def _compute_excess_penalty(self, scenario, time):
         """
