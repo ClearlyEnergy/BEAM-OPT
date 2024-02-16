@@ -213,34 +213,19 @@ class Optimizer:
 
     def _optimize(self, scenario='Consumption', target_only=False):
         """
+        Perform optimization of measures with backwards recursion.
+
         NOTE: All cashflows are computed up to terminal time
-        The argument target_only is not really used. I just set it here in case someone wants to know what if I don't
-        care about the cost and saving cashflows, but only want to see if I can meet the target within budget, priority
-        and start year constraints
+        The argument target_only is not really used. I just set it here in case
+        someone wants to know what if I don't care about the cost and saving
+        cashflows, but only want to see if I can meet the target within budget,
+        priority and start year constraints.
         """
         time_diff: np.ndarray = np.diff(self.timeline)
         delta_n: np.ndarray[np.float64] = (self.delta ** self.selected_df.Life).to_numpy()
-        all_indices: np.ndarray[np.int64] = np.arange(self.ns, dtype=np.int64)
+        all_indices: np.ndarray = np.arange(self.ns, dtype=np.int64)
         cost_inc: np.ndarray[np.int64] = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost).to_numpy()
-        selected_priority_df: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
-        selected_priority_np: np.ndarray = selected_priority_df.to_numpy()
-        ind_priority: np.ndarray[np.bool_] = np.ones([self.ns, self.ns], dtype=bool)
-        ind_need_prereq: np.ndarray[np.bool_] = (~selected_priority_df.isna()).any(axis=0).to_numpy()
-        ind_installed: np.ndarray[np.bool_] = self.Xmat.astype(bool)
-
-        # precompute feasibility
-        ind_feasible_list: list[list[bool]] = []
-        for i in range(self.ns):
-            ind_feasible = self.Xmat_ind | ~(self.Xmat_ind[i])
-            ind_feasible = ind_feasible.all(axis=1) & ind_priority[i]
-            ind_feasible_list.append(ind_feasible)
-            self._compute_feasible_state(
-                selected_priority_np,
-                ind_installed,
-                ind_need_prereq,
-                ind_priority,
-                i
-            )
+        ind_priority, ind_feasible_list = self._compute_feasible_states()
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.measure_df.columns:
@@ -250,16 +235,17 @@ class Optimizer:
             unavailable_groups: npt.NDArray = np.repeat(False, self.T)
 
         V: np.ndarray[np.float32] = np.full((self.ns), np.inf, np.float32)  # Value function
-        Xt_idx: np.ndarray[np.int64] = np.full([self.T, self.ns], -1, dtype=np.int64)  # Optimal decision for each state
+        Xt_tuple = np.dtype([('decision', np.int64), ('penalty', np.float32)])
+        initial_value = np.array((-1, 0), dtype=Xt_tuple)
+        Xt_idx: np.ndarray = np.full([self.T, self.ns], initial_value)  # Optimal decision for each state and its penalty
         Vnext: np.ndarray[np.float32] = np.zeros(self.ns, dtype=np.float32)  # Terminal value function
 
-        first_year = self.timeline[0]
         cost_values: np.ndarray[np.float64] = self.selected_df.Cost.to_numpy()
 
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
-            time_span = self.timeline[t] - first_year
-            excess_payment: np.ndarray = self._compute_excess_penalty(scenario, t)
+            total_time_span = self.timeline[t] - self.timeline[0]
+            excess_payment: np.ndarray = self._penalty_per_state(scenario, t)
             # Discount factor for discounting V_{t+1}
             disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
 
@@ -290,7 +276,7 @@ class Optimizer:
             else:
                 current_time_range = range(0)
 
-            gas_usage = self._compute_gas_usage(scenario, t, time_diff)
+            gas_usage = self._gas_usage_per_state(scenario, t, time_diff)
 
             # Compute V_t for each state
             for i in range(self.ns):
@@ -321,17 +307,19 @@ class Optimizer:
                     continue
 
                 # Compute V_t values
-                obj_vals = excess_payment[index_feasible, time_span]
+                penalty_per_state = excess_payment[index_feasible, total_time_span]
                 for y in current_time_range:
-                    obj_vals = excess_payment[index_feasible, y_past + y] + self.delta * obj_vals
+                    penalty_per_state = excess_payment[index_feasible, y_past + y] + self.delta * penalty_per_state
 
-                obj_vals = obj_vals + disc * Vnext[index_feasible]
+                # Add cost of next least expensive transition
+                obj_vals = penalty_per_state + disc * Vnext[index_feasible]
                 if not target_only:
                     costs_inc = self.Xmat_ind[index_feasible] @ (discounted_cost)  # Cost for replacement
                     obj_vals = obj_vals + cost_per_state[ind_cost] + costs_inc - sum_disc * self.annual_bill_saving[index_feasible]
 
                 idx_min = obj_vals.argmin()
-                Xt_idx[t, i] = index_feasible[idx_min]
+                Xt_idx[t, i]['decision'] = index_feasible[idx_min]
+                Xt_idx[t, i]['penalty'] = penalty_per_state[idx_min]
                 V[i] = obj_vals[idx_min]
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
@@ -340,31 +328,42 @@ class Optimizer:
 
         # Forward recursion
         Xstar_idx = np.zeros(self.T, dtype=np.int64)
+        Xstar_penalty = np.zeros(self.T, dtype=np.float32)
         for t in range(self.T):
-            Xstar_idx[t] = Xt_idx[t, 0] if t == 0 else Xt_idx[t, Xstar_idx[t - 1]]
+            decision_tuple = Xt_idx[t, 0] if t == 0 else Xt_idx[t, Xstar_idx[t - 1]]
+            Xstar_idx[t] = decision_tuple['decision']
+            Xstar_penalty[t] = decision_tuple['penalty']
 
         # Output
         self.Xoptimal = self.Xmat[Xstar_idx]
         self.Xoptimal_ind = self.Xmat_ind[Xstar_idx]
         self.total_cost = V[0]
         result = self._calculate_forward_reduction(self.Xoptimal_ind, scenario)
-        return result
+        return result, Xstar_penalty.tolist()
 
-    def _compute_feasible_state(self,
-                                selected_priority,
-                                ind_installed,
-                                ind_need_prereq,
-                                ind_priority,  # mutable
-                                idx):
+    def _compute_feasible_states(self):
         """
         """
-        subind_unready = ~selected_priority[ind_installed[idx]][:, ind_need_prereq].any(axis=0)
-        for j in np.where(subind_unready)[0]:
-            # groups having prerequisites and installed
-            ind1 = ind_installed[:, (self.selected_groups == j)].reshape(-1)
-            # groups that are prerequisites and installed
-            ind2 = self.Xmat[:, selected_priority[j].notna()].any(axis=1)
-            ind_priority[idx, ind1 & (~ind2)] = False
+        ind_priority: np.ndarray[np.bool_] = np.ones([self.ns, self.ns], dtype=bool)
+        ind_feasible_list: list[list[bool]] = []
+
+        selected_priority_df: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
+        selected_priority_np: np.ndarray = selected_priority_df.to_numpy()
+        ind_need_prereq: np.ndarray[np.bool_] = (~selected_priority_df.isna()).any(axis=0).to_numpy()
+        for i in range(self.ns):
+            ind_feasible = self.Xmat_ind | ~(self.Xmat_ind[i])
+            ind_feasible = ind_feasible.all(axis=1) & ind_priority[i]
+            ind_feasible_list.append(ind_feasible)
+            ind_installed: np.ndarray[np.bool_] = self.Xmat.astype(bool)
+            subind_unready = ~selected_priority_np[ind_installed[i]][:, ind_need_prereq].any(axis=0)
+            for j in np.where(subind_unready)[0]:
+                # groups having prerequisites and installed
+                ind1 = ind_installed[:, (self.selected_groups == j)].reshape(-1)
+                # groups that are prerequisites and installed
+                ind2 = self.Xmat[:, selected_priority_np[j].notna()].any(axis=1)
+                ind_priority[i, ind1 & (~ind2)] = False
+
+        return ind_priority, ind_feasible_list
 
     def _exclude_redundant_variables(self, ind_feasible, state_i, gas_usage):
         """
@@ -375,14 +374,13 @@ class Optimizer:
         :param state_i: state index from which transition may occur
         :param gas_usage: gas usage per state (after reduction applied)
         """
-
         gas_delta = gas_usage - gas_usage[state_i]
         if gas_usage[state_i] > 0:
             return ind_feasible
         else:
             return ind_feasible & (gas_delta == 0)
 
-    def _compute_gas_usage(self, scenario, t, time_diff):
+    def _gas_usage_per_state(self, scenario, t, time_diff):
         """
         Precompute gas usage for each state in given year.
 
@@ -398,7 +396,7 @@ class Optimizer:
         gas_usage = baseline_gas - gas_reduction
         return gas_usage
 
-    def _compute_excess_penalty(self, scenario, time):
+    def _penalty_per_state(self, scenario, time):
         """
         :param str scenario:
         :param int time:
@@ -409,6 +407,8 @@ class Optimizer:
         target_usage = np.array(getattr(self, LOOKUP[scenario]['target']))[None, :]
         excess = baseline_usage - current_reduction - target_usage
         excess_penalty = np.where(excess > 0, excess, 0) * self.penalty
+        if scenario == 'Emission':
+            excess_penalty = excess_penalty / 1000
         return excess_penalty
 
     def _calculate_forward_reduction(self, scenario_selection, scenario='Consumption'):
@@ -531,7 +531,8 @@ class Optimizer:
                 self.Xoptimal_ind = np.array(scenario_selection)
                 sol = self._compile_solution(filtered=True)
             else:
-                self._optimize(scenario)
+                _, penalties = self._optimize(scenario)
+                self.penalties = penalties
                 sol = self._compile_solution(filtered=False)
 
             self.solution = pd.DataFrame(sol)
@@ -635,11 +636,17 @@ class Optimizer:
     def get_solution(self):
         # Retrieve the measures installed at each time point
         return getattr(self, 'solution', None)
+    
+    def get_penalties(self):
+        return self.penalties
 
     def get_level(self, scenario):
-        # Retrieve new Consumption/Emission level based on baseline
-        # Retrieve the associated reduction from the measures data by Electricity and Natural Gas
-        # Retrieve the cost of implementing the measures at each interval
+        """
+        Retrieve new Consumption/Emission level based on baseline
+        Retrieve the associated reduction from the measures data by Electricity and Natural Gas
+        Retrieve the cost of implementing the measures at each interval
+        """
+        
         solution_df = self.get_solution()
         measures = solution_df['New Measure'].to_list()
 
@@ -649,20 +656,29 @@ class Optimizer:
                 'electricity_cycle_reduction': [0] * self.T,
                 'gas_cycle_reduction': [0] * self.T,
                 'cost': [0] * self.T}
-        total_elec, total_gas = 0, 0
-        for year_index, set_of_measures in enumerate(measures):
+        total_gas = 0
+
+        accumulated_measures = []
+        cumulative_list = []
+        for sub_lst in measures:
+            cumulative_list.extend(sub_lst)
+            accumulated_measures.append(cumulative_list.copy())
+
+        for t, set_of_measures in enumerate(measures):
             set_of_measures_df = self.measure_df[self.measure_df['Identifier'].isin(set_of_measures)]
 
-            elec_col = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[year_index])
-            gas_col = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[year_index])
+            elec_col = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[t])
+            gas_col = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[t])
 
-            data['electricity_cycle_reduction'][year_index] = set_of_measures_df[elec_col].sum()
-            data['gas_cycle_reduction'][year_index] = set_of_measures_df[gas_col].sum()
-            data['cost'][year_index] = set_of_measures_df['Cost'].sum()
+            data['electricity_cycle_reduction'][t] = set_of_measures_df[elec_col].sum()
+            data['gas_cycle_reduction'][t] = set_of_measures_df[gas_col].sum()
+            data['cost'][t] = set_of_measures_df['Cost'].sum()
 
-            data['electricity_reduced_by'][year_index] = set_of_measures_df[elec_col].sum() + total_elec
-            data['gas_reduced_by'][year_index] = set_of_measures_df[gas_col].sum() + total_gas
-            total_elec += set_of_measures_df[elec_col].sum()
+            current_set_of_measures = accumulated_measures[t]
+            current_set_of_measures_df = self.measure_df[self.measure_df['Identifier'].isin(current_set_of_measures)]
+            data['electricity_reduced_by'][t] += current_set_of_measures_df[elec_col].sum()
+            
+            data['gas_reduced_by'][t] = set_of_measures_df[gas_col].sum() + total_gas
             total_gas += set_of_measures_df[gas_col].sum()
 
         output_df = pd.DataFrame(data).merge(self.timeline_df, on='Year', how='right').fillna(method='ffill')
