@@ -384,17 +384,16 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
                 .idxmax().fillna(0).astype(int)]
     df.sort_index(inplace=True)
 
+    # missing_columns = []
+    # for column in PROPERTY_STATE_REQUIRED_COLUMNS:
+    #     if column not in state.extra_data:
+    #         missing_columns.append(column)
 
-    missing_columns = []
-    for column in PROPERTY_STATE_REQUIRED_COLUMNS:
-        if column not in state.extra_data:
-            missing_columns.append(column)
-    
-    if missing_columns:
-        return {
-            'status': 'error',
-            'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
-        }
+    # if missing_columns:
+    #     return {
+    #         'status': 'error',
+    #         'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
+    #     }
 
     baseline_elec = state.extra_data.get('Electricity Use - Grid Purchase (kBtu)')
     baseline_gas = state.extra_data.get('Natural Gas Use (kBtu)')
@@ -597,6 +596,7 @@ def _worse_scenario(left_scenario, right_scenario):
 
     return left_scenario if left_savings <= right_savings else right_scenario
 
+
 def _baseline_fuels_by_emission_rates(emission_rates, timeline, baseline_elec, baseline_gas):
     """
     """
@@ -616,4 +616,3 @@ def _baseline_fuels_by_emission_rates(emission_rates, timeline, baseline_elec, b
         years_past += period_len
 
     return elec_use, gas_use
-
