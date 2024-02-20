@@ -79,7 +79,9 @@ class Optimizer:
         self.total_years = timeline[-1] - timeline[0] + 1
         self.timeline = np.asarray(timeline)
         self.T = len(self.timeline)
+        self.time_diff = np.diff(self.timeline)
         self.timeline_df = pd.DataFrame(np.arange(timeline[0], timeline[-1] + 1), columns=['Year'])
+
         FUEL_COLS = [LOOKUP[scenario]['electricity'], LOOKUP[scenario]['gas'], LOOKUP[scenario]['optimize']]
         self.baseline = self.baseline.explode(FUEL_COLS).reset_index(drop=True)
         self.baseline['Year'] = self.timeline_df
@@ -194,13 +196,13 @@ class Optimizer:
         Xmat_re = np.array(list(itertools.product(*[[0] + x for x in df_tmp.groupby("Group").Index_re.apply(list)])))
         for i, Xvec in enumerate(Xmat_re[ind_priority]):
             self.Xmat_ind[i, marks[Xvec > 0] + Xvec[Xvec > 0] - 1] = 1
-        # Pre-computation
-        reductions_by_t = []
+
+        self.reduction_per_cycle = []
         for t, _ in enumerate(self.timeline):
             reduction_at_t = self.Xmat_ind @ self.selected_df[col_label_by_year(LOOKUP[scenario]['data'], self.timeline[t])]
-            reductions_by_t.append(reduction_at_t)
+            self.reduction_per_cycle.append(reduction_at_t)
 
-        setattr(self, LOOKUP[scenario]['reduction'], reductions_by_t)
+        self.reduction_per_cycle = np.array(self.reduction_per_cycle)
         self.annual_bill_saving = self.Xmat_ind @ self.selected_df.Annual_Saving
 
     def _optimize(self, scenario='Consumption', target_only=False):
@@ -213,11 +215,11 @@ class Optimizer:
         cashflows, but only want to see if I can meet the target within budget,
         priority and start year constraints.
         """
-        time_diff: np.ndarray = np.diff(self.timeline)
         delta_n: np.ndarray[np.float64] = (self.delta ** self.selected_df.Life).to_numpy()
         all_indices: np.ndarray = np.arange(self.ns, dtype=np.int64)
         cost_inc: np.ndarray[np.int64] = self.selected_df.Cost_Incremental.fillna(self.selected_df.Cost).to_numpy()
-        ind_priority, ind_feasible_list = self._compute_feasible_states()
+        ind_priority, ind_feasible_list = self._feasible_states()
+        penalty_per_state: np.ndarray = self._penalty_per_state(scenario)
 
         # Precompute feasibility due to start-year constraint
         if 'Start_Year' in self.measure_df.columns:
@@ -235,19 +237,20 @@ class Optimizer:
 
         # Backward recursion
         for t in range(self.T - 1, -1, -1):
-            total_time_span = self.timeline[t] - self.timeline[0]
-            excess_payment: np.ndarray = self._penalty_per_state(scenario, t)
+            years_past = self.timeline[t] - self.timeline[0]
+            current_cycle_len = self.time_diff[t] if t < len(self.time_diff) else 1
+            current_cycle_range = range(current_cycle_len - 1, -1, -1)
+
             # Discount factor for discounting V_{t+1}
-            disc = (self.delta ** time_diff[t] if t < self.T - 1 else 1)
+            disc = (self.delta ** self.time_diff[t] if t < self.T - 1 else 1)
 
             # Discount factor for discounting annual bill savings between t and t+1
             if t == self.T - 1:
                 sum_disc = 1
             elif self.delta == 1:
-                sum_disc = time_diff[t]
+                sum_disc = self.time_diff[t]
             else:
-                sum_disc = (1 - self.delta ** time_diff[t]) / (1 - self.delta)
-            y_past = time_diff[:t].sum() if t > 0 else 0
+                sum_disc = (1 - self.delta ** self.time_diff[t]) / (1 - self.delta)
 
             # Discount factor for discounting all future incremental costs between t and T
             n_life = np.floor((self.timeline[-1] - self.timeline[t]) / self.selected_df.Life)
@@ -261,13 +264,7 @@ class Optimizer:
             budget = self.budget[t]
             unavail_factors = (self.Xmat[:, unavailable_groups[t]] == 0).all(axis=1)
             unavailable_group_t = unavailable_groups[t - 1]
-
-            if t < self.T - 1:
-                current_time_range = range(time_diff[t] - 1, -1, -1)
-            else:
-                current_time_range = range(0)
-
-            gas_usage = self._gas_usage_per_state(scenario, t, time_diff)
+            gas_usage = self._gas_usage_per_state(scenario, t)
 
             # Compute V_t for each state
             for i in range(self.ns):
@@ -298,19 +295,19 @@ class Optimizer:
                     continue
 
                 # Compute V_t values
-                penalty_per_state = excess_payment[index_feasible, total_time_span]
-                for y in current_time_range:
-                    penalty_per_state = excess_payment[index_feasible, y_past + y] + self.delta * penalty_per_state
+                penalty_in_cycle = np.zeros_like(penalty_per_state[index_feasible, years_past])
+                for y in current_cycle_range:
+                    penalty_in_cycle = penalty_per_state[index_feasible, years_past + y] + self.delta * penalty_in_cycle
 
                 # Add cost of next least expensive transition
-                obj_vals = penalty_per_state + disc * Vnext[index_feasible]
+                obj_vals = penalty_in_cycle + disc * Vnext[index_feasible]
                 if not target_only:
                     costs_inc = self.Xmat_ind[index_feasible] @ (discounted_cost)  # Cost for replacement
                     obj_vals = obj_vals + cost_per_state[ind_cost] + costs_inc - sum_disc * self.annual_bill_saving[index_feasible]
 
                 idx_min = obj_vals.argmin()
                 Xt_idx[t, i]['decision'] = index_feasible[idx_min]
-                Xt_idx[t, i]['penalty'] = penalty_per_state[idx_min]
+                Xt_idx[t, i]['penalty'] = penalty_in_cycle[idx_min]
                 V[i] = obj_vals[idx_min]
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
@@ -332,12 +329,11 @@ class Optimizer:
         result = self._calculate_forward_reduction(self.Xoptimal_ind, scenario)
         return result, Xstar_penalty.tolist()
 
-    def _compute_feasible_states(self):
+    def _feasible_states(self):
         """
         """
         ind_priority: np.ndarray[np.bool_] = np.ones([self.ns, self.ns], dtype=bool)
         ind_feasible_list: list[list[bool]] = []
-
         selected_priority_df: pd.DataFrame = self.priority.loc[self.selected_groups, self.selected_groups]
         selected_priority_np: np.ndarray = selected_priority_df.to_numpy()
         ind_need_prereq: np.ndarray[np.bool_] = (~selected_priority_df.isna()).any(axis=0).to_numpy()
@@ -371,36 +367,45 @@ class Optimizer:
         else:
             return ind_feasible & (gas_delta == 0)
 
-    def _gas_usage_per_state(self, scenario, t, time_diff):
+    def _gas_usage_per_state(self, scenario, cycle_idx):
         """
         Precompute gas usage for each state in given year.
 
         :param str scenario:
-        :param int t: index of time period
-        :param time_diff: list of difference in time between periods
+        :param int cycle_idx:
         """
-        year_idx = time_diff[:(t + 1)].sum()
+        year_idx = self.time_diff[:(cycle_idx + 1)].sum()
         baseline_gas = getattr(self.baseline, LOOKUP[scenario]['baseline_gas']).values[year_idx]
-        gas_col_label = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[t])
+        gas_col_label = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[cycle_idx])
         gas_reduction = getattr(self.measure_df, gas_col_label).to_numpy()
         gas_reduction = np.sum(self.Xmat_ind * gas_reduction, axis=1)
         gas_usage = baseline_gas - gas_reduction
         return gas_usage
 
-    def _penalty_per_state(self, scenario, time):
+    def _penalty_per_state(self, scenario):
         """
         :param str scenario:
-        :param int time:
-        :return NDArray:
+        :return NDArray: 2D array of penalties per year per state.
+        The first axis of result is the state index, and the second axis is over
+        every year of the timeline.
         """
-        baseline_usage = getattr(self.baseline, LOOKUP[scenario]['optimize']).values[None, :]
-        current_reduction = getattr(self, LOOKUP[scenario]['reduction'])[time][:, None]
-        target_usage = np.array(getattr(self, LOOKUP[scenario]['target']))[None, :]
-        excess = baseline_usage - current_reduction - target_usage
-        excess_penalty = np.where(excess > 0, excess, 0) * self.penalty
+        reduction_per_year = []
+        for t, _ in enumerate(self.timeline):
+            cycle_length = self.time_diff[t] if t < len(self.time_diff) else 1
+            reduction = self.reduction_per_cycle[t]
+            for _ in range(cycle_length):
+                reduction_per_year.append(reduction)
+
+        reduction_per_year = np.array(reduction_per_year)
+        baseline_usage = getattr(self.baseline, LOOKUP[scenario]['optimize']).values[:,None]
+        target_usage = np.array(getattr(self, LOOKUP[scenario]['target']))[:,None]
+        excess = baseline_usage - reduction_per_year - target_usage
+        excess = np.transpose(excess)
+        penalty = np.where(excess > 0, excess, 0) * self.penalty
         if scenario == 'Emission':
-            excess_penalty = excess_penalty / 1000
-        return excess_penalty
+            penalty = penalty / 1000
+
+        return penalty
 
     def _calculate_forward_reduction(self, scenario_selection, scenario='Consumption'):
         """
@@ -449,7 +454,6 @@ class Optimizer:
         top_measures_by_group = self.measure_df.groupby('Group', group_keys=False)[first_year_data]
         df_base = self.measure_df.loc[top_measures_by_group.idxmax().values]
         df_base = df_base.sort_values(by=first_year_data)
-        time_diff = np.diff(self.timeline)
 
         Xbase = np.zeros([self.T, df_base.shape[0]], dtype=int)  # base configuration
         obj_base = 0
@@ -462,7 +466,7 @@ class Optimizer:
         baseline_optimize = getattr(self.baseline, LOOKUP[scenario]['optimize'])
         baseline_target = getattr(self, LOOKUP[scenario]['target'])
         for t in range(self.T):
-            y_past = time_diff[:t].sum() if t > 0 else 0
+            y_past = self.time_diff[:t].sum() if t > 0 else 0
             cost = 0
             # Compute discounting for future annual bill savings (to time t)
             if self.delta == 1:
@@ -496,14 +500,14 @@ class Optimizer:
                 time_delta = self.timeline[t] - self.timeline[0]
                 excess_penalty = baseline_optimize.iloc[time_delta] - reducing_power - baseline_target.iloc[time_delta]
                 excess_penalty = np.maximum(excess_penalty, 0)
-                excess_penalty *= self.penalty * time_diff[t - 1]
+                excess_penalty *= self.penalty * self.time_diff[t - 1]
                 if not np.isinf(excess_penalty) and t < (self.T - 1):
-                    for y in range(time_diff[t] - 1, -1, -1):
+                    for y in range(self.time_diff[t] - 1, -1, -1):
                         if np.isinf(excess_penalty):
                             break
                         excess = baseline_optimize.iloc[y_past + y] - reducing_power - baseline_target.iloc[y_past + y]
                         excess = np.maximum(excess, 0)
-                        excess_penalty = self.delta * excess_penalty + excess * self.penalty * time_diff[t - 1]
+                        excess_penalty = self.delta * excess_penalty + excess * self.penalty * self.time_diff[t - 1]
 
                 if np.isinf(excess_penalty):
                     obj_base = np.inf
