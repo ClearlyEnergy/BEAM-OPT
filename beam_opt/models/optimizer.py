@@ -44,7 +44,7 @@ LOOKUP = {
 
 class Optimizer:
 
-    def __init__(self, complete_data: CompleteData, bldg_id, timeline: list):
+    def __init__(self, complete_data: CompleteData, scenario, bldg_id, timeline: list):
         bldg_id = [str(bldg_id)]
         if len(bldg_id) != 1:
             raise Exception("Received incorrect number of building ids")
@@ -59,7 +59,6 @@ class Optimizer:
 
         # This next line should be changed once more data available
         self.baseline['Year'] = timeline[0] + np.arange(0, self.baseline.shape[0])
-
         # Retrieve and store measures data from complete_data
         measures_result = complete_data.get_measure_data(bldg_id)
         measures_df = pd.read_json(json.dumps(measures_result['measure_data']), orient='split')
@@ -71,28 +70,21 @@ class Optimizer:
 
         self.measure_df['Total_Bill_Saving'] = self.measure_df.Electricity_Bill_Saving + self.measure_df.Gas_Bill_Saving
         self.measure_df = self.measure_df.sort_values(['Group', 'Index'], ascending=[True, True])
-        self.measure_df.reset_index(inplace=True, drop=True)
+        self.measure_df = self.measure_df.reset_index(drop=True)
 
         # Retrieve and store Priority data from complete_data
         priority_results = complete_data.get_priority_chart(bldg_id)
         self.priority: pd.DataFrame = [*priority_results['priority_chart'].values()][0]
 
         self.total_years = timeline[-1] - timeline[0] + 1
-        # if self.total_years!=self.baseline.shape[0]: # I'm not sure whether it's important to return error messages, but the initializer cannot return objects so I raised an exception
-        #     asw=input("Received incorrect timeline or baseline data. Do you want to replicate/resample to fill baseline data? Y/N")
-        #     if asw=='Y' or asw=='y':
-        #         self.baseline=self.baseline.merge(pd.DataFrame(np.arange(timeline[0],timeline[-1]+1),columns=['Year']),how='right',on='Year').fillna(method='ffill')
-        #     elif asw=='N' or asw=='n':
-        #         raise Exception("Received incorrect timeline or baseline data: time horizon ("+str(self.total_years)+" years) doesn\'t match length of baseline projection ("+str(self.baseline.shape[0])+" years)")
-        #     else:
-        #         raise Exception("Invalid input: only Y/N allowed")
-        self.timeline = np.asarray(timeline)  # time points
-        self.timeline_df = pd.DataFrame(np.arange(timeline[0], timeline[-1] + 1), columns=['Year'])
-        self.baseline = self.baseline.merge(self.timeline_df, how='right',
-                                            on='Year').fillna(method='ffill').set_index('Year')
+        self.timeline = np.asarray(timeline)
         self.T = len(self.timeline)
+        self.timeline_df = pd.DataFrame(np.arange(timeline[0], timeline[-1] + 1), columns=['Year'])
+        FUEL_COLS = [LOOKUP[scenario]['electricity'], LOOKUP[scenario]['gas'], LOOKUP[scenario]['optimize']]
+        self.baseline = self.baseline.explode(FUEL_COLS).reset_index(drop=True)
+        self.baseline['Year'] = self.timeline_df
+        self.baseline = self.baseline.set_index('Year')
 
-        # ### Initialize Parameters that will be set later
         # Parameters set by set_parameters func
         self.delta = None
         self.budget = None
@@ -239,7 +231,6 @@ class Optimizer:
         initial_value = np.array((-1, 0), dtype=Xt_tuple)
         Xt_idx: np.ndarray = np.full([self.T, self.ns], initial_value)  # Optimal decision for each state and its penalty
         Vnext: np.ndarray[np.float32] = np.zeros(self.ns, dtype=np.float32)  # Terminal value function
-
         cost_values: np.ndarray[np.float64] = self.selected_df.Cost.to_numpy()
 
         # Backward recursion
@@ -636,7 +627,7 @@ class Optimizer:
     def get_solution(self):
         # Retrieve the measures installed at each time point
         return getattr(self, 'solution', None)
-    
+
     def get_penalties(self):
         return self.penalties
 
@@ -646,7 +637,7 @@ class Optimizer:
         Retrieve the associated reduction from the measures data by Electricity and Natural Gas
         Retrieve the cost of implementing the measures at each interval
         """
-        
+
         solution_df = self.get_solution()
         measures = solution_df['New Measure'].to_list()
 
@@ -666,18 +657,14 @@ class Optimizer:
 
         for t, set_of_measures in enumerate(measures):
             set_of_measures_df = self.measure_df[self.measure_df['Identifier'].isin(set_of_measures)]
-
             elec_col = col_label_by_year(LOOKUP[scenario]['electricity'], self.timeline[t])
             gas_col = col_label_by_year(LOOKUP[scenario]['gas'], self.timeline[t])
-
             data['electricity_cycle_reduction'][t] = set_of_measures_df[elec_col].sum()
             data['gas_cycle_reduction'][t] = set_of_measures_df[gas_col].sum()
             data['cost'][t] = set_of_measures_df['Cost'].sum()
-
             current_set_of_measures = accumulated_measures[t]
             current_set_of_measures_df = self.measure_df[self.measure_df['Identifier'].isin(current_set_of_measures)]
             data['electricity_reduced_by'][t] += current_set_of_measures_df[elec_col].sum()
-            
             data['gas_reduced_by'][t] = set_of_measures_df[gas_col].sum() + total_gas
             total_gas += set_of_measures_df[gas_col].sum()
 

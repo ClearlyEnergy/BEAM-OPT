@@ -13,8 +13,8 @@ from beam_opt.utils.parse import group_identifier_rmi
 
 class CompleteData:
     """
-    Take dataframe (measure_data) returned by parse function as input, add exclusion/priority relationship for use
-    of optimization program
+    Take dataframe (measure_data) returned by parse function as input,
+    and add exclusion/priority relationship for use of optimization program
     """
 
     def __init__(self, parsed_data, file_exclusion, default_priority=None, source='RMI'):
@@ -38,6 +38,7 @@ class CompleteData:
             # Format Measures into Groups based on their Group name
             self.measure_data = parsed_data['measure_data'].groupby('Building', group_keys=False).apply(
                 lambda x: add_group_buildingsync(x))
+
         self.measure_data['Building'] = self.measure_data['Building'].astype(str)
 
         # Parse priority for all exclusion groups
