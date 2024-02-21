@@ -88,7 +88,13 @@ def validate_complete_data(complete_data: CompleteData, ids):
     return errors if errors else None
 
 
-def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta):
+def pre_validate_parameters(
+        optimizer: Optimizer,
+        budget, target,
+        penalty_emission,
+        penalty_consumption,
+        penalty_flat,
+        delta):
     """
     Check that all of the parameters are valid
     """
@@ -104,7 +110,9 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
         errors.append('Invalid input: must choose target > 0')
     if delta < 0 or delta > 1:  # discount factor
         errors.append('Invalid input: must choose delta in [0,1]')
-    if penalty < 0:  # penalty rate for consumption/emission
+    if penalty_emission < 0 \
+            or penalty_consumption < 0 \
+            or penalty_flat < 0:
         errors.append('Invalid input: must choose nonnegative penalty')
 
     # Check that Target is Achievable
@@ -114,7 +122,9 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
 
     if optimizer.scenario in LOOKUP:
         lookup = LOOKUP[optimizer.scenario]
-        if np.isinf(penalty):
+        if np.isinf(penalty_emission) \
+                or np.isinf(penalty_consumption) \
+                or np.isinf(penalty_flat):
             # Check whether target is achievable
             target = target_df.Target * optimizer.baseline[lookup['optimize']].iloc[0]
             max_reduction = optimizer.df.groupby('Group')[lookup['data']].max().sum()
@@ -140,4 +150,3 @@ def post_validate_parameters(optimizer: Optimizer):
     if not hasattr(optimizer, lookup['target']):
         errors.append('Must set Target before calling Optimization')
     return errors if errors else None
-

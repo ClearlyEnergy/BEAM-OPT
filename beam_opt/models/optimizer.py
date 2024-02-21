@@ -95,7 +95,9 @@ class Optimizer:
         # Parameters set by set_parameters func
         self.delta = None
         self.budget = None
-        self.penalty = None
+        self.penalty_emission = 0
+        self.penalty_consumption = 0
+        self.penalty_flat = 0
         self.selected_df = None
 
         # Parameters set in optimize func
@@ -107,12 +109,20 @@ class Optimizer:
         self.total_cost = None
         self.solution = None
 
-    def set_parameters(self, budget, target, penalty, delta):
+    def set_parameters(
+            self,
+            budget,
+            target,
+            penalty_emission,
+            penalty_consumption,
+            penalty_flat,
+            delta):
         self.delta = delta
         self.budget = np.array(budget)
-        self.penalty = penalty
+        self.penalty_emission = penalty_emission
+        self.penalty_consumption = penalty_consumption
+        self.penalty_flat = penalty_flat
 
-        # Set target attribute
         target_df = pd.DataFrame({'Target': target, 'Year': self.timeline})
         target_df = target_df.merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
         setattr(self, LOOKUP[self.scenario]['target'], target_df.Target * 1000)  # target_df.Target is in mtCO2e, convert to kg
@@ -404,10 +414,21 @@ class Optimizer:
         target_usage = np.array(getattr(self, LOOKUP[self.scenario]['target']))[:, None]
         excess = baseline_usage - reduction_per_year - target_usage
         excess = np.transpose(excess)
-        penalty = np.where(excess > 0, excess, 0) * self.penalty
-        if self.scenario == 'Emission':
-            penalty = penalty / 1000
+        penalty = self._apply_penalty(excess)
+        return penalty
 
+    def _apply_penalty(self, excess):
+        """
+        :param excess: a numpy array or scalar to which penalties are applied
+        :return: a numpy array or scalar of same shape as excess with applied penalties
+        """
+        if self.scenario == 'Emission':
+            penalty = np.where(excess > 0, excess, 0) * self.penalty_emission
+            penalty = penalty / 1000  # assume excess in kgCO2, penalty in mtCO2
+        elif self.scenario == 'Consumption':
+            penalty = np.where(excess > 0, excess, 0) * self.penalty_consumption
+
+        penalty = np.where(penalty > 0, penalty + self.penalty_flat, penalty)
         return penalty
 
     def _calculate_forward_reduction(self, scenario_selection):
@@ -500,16 +521,16 @@ class Optimizer:
                 # Compute total cost (objective value)
                 reducing_power += getattr(df_base, col_label_by_year(LOOKUP[self.scenario]['data'], self.timeline[t]))[i]
                 time_delta = self.timeline[t] - self.timeline[0]
-                excess_penalty = baseline_optimize.iloc[time_delta] - reducing_power - baseline_target.iloc[time_delta]
-                excess_penalty = np.maximum(excess_penalty, 0)
-                excess_penalty *= self.penalty * self.time_diff[t - 1]
+                excess = baseline_optimize.iloc[time_delta] - reducing_power - baseline_target.iloc[time_delta]
+                excess = np.maximum(excess, 0)
+                excess_penalty = self._apply_penalty(excess) * self.time_diff[t - 1]
                 if not np.isinf(excess_penalty) and t < (self.T - 1):
                     for y in range(self.time_diff[t] - 1, -1, -1):
                         if np.isinf(excess_penalty):
                             break
                         excess = baseline_optimize.iloc[y_past + y] - reducing_power - baseline_target.iloc[y_past + y]
                         excess = np.maximum(excess, 0)
-                        excess_penalty = self.delta * excess_penalty + excess * self.penalty * self.time_diff[t - 1]
+                        excess_penalty = self.delta * excess_penalty + self._apply_penalty(excess) * self.time_diff[t - 1]
 
                 if np.isinf(excess_penalty):
                     obj_base = np.inf
