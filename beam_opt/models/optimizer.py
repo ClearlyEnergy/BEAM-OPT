@@ -311,8 +311,10 @@ class Optimizer:
 
                 # Compute V_t values
                 penalty_in_cycle = np.zeros_like(penalty_per_state[index_feasible, years_past])
+                penalty_in_cycle_undiscounted = np.zeros_like(penalty_per_state[index_feasible, years_past])
                 for y in current_cycle_range:
                     penalty_in_cycle = penalty_per_state[index_feasible, years_past + y] + self.delta * penalty_in_cycle
+                    penalty_in_cycle_undiscounted += penalty_per_state[index_feasible, years_past + y]
 
                 # Add cost of next least expensive transition
                 obj_vals = penalty_in_cycle + disc * Vnext[index_feasible]
@@ -322,7 +324,7 @@ class Optimizer:
 
                 idx_min = obj_vals.argmin()
                 Xt_idx[t, i]['decision'] = index_feasible[idx_min]
-                Xt_idx[t, i]['penalty'] = penalty_in_cycle[idx_min]
+                Xt_idx[t, i]['penalty'] = penalty_in_cycle_undiscounted[idx_min]
                 V[i] = obj_vals[idx_min]
                 if t == 0:  # Note for t=0, only V(0) needs assessment
                     break
@@ -422,13 +424,15 @@ class Optimizer:
         :param excess: a numpy array or scalar to which penalties are applied
         :return: a numpy array or scalar of same shape as excess with applied penalties
         """
-        if self.scenario == 'Emission':
-            penalty = np.where(excess > 0, excess, 0) * self.penalty_emission
+        penalty = np.zeros_like(excess)
+        if self.scenario == 'Emission' and self.penalty_emission > 0:
+            penalty += np.where(excess > 0, excess, 0) * self.penalty_emission
             penalty = penalty / 1000  # assume excess in kgCO2, penalty in mtCO2
-        elif self.scenario == 'Consumption':
-            penalty = np.where(excess > 0, excess, 0) * self.penalty_consumption
+        elif self.scenario == 'Consumption' and self.penalty_consumption > 0:
+            penalty += np.where(excess > 0, excess, 0) * self.penalty_consumption
 
-        penalty = np.where(penalty > 0, penalty + self.penalty_flat, penalty)
+        flat_penalty = np.where(excess > 0, self.penalty_flat, 0)
+        penalty += flat_penalty
         return penalty
 
     def _calculate_forward_reduction(self, scenario_selection):
