@@ -88,12 +88,18 @@ def validate_complete_data(complete_data: CompleteData, ids):
     return errors if errors else None
 
 
-def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta, scenario):
+def pre_validate_parameters(
+        optimizer: Optimizer,
+        budget, target,
+        penalty_emission,
+        penalty_consumption,
+        penalty_flat,
+        delta):
     """
     Check that all of the parameters are valid
     """
     errors = []
-    if scenario not in ['Consumption', 'Emission']:
+    if optimizer.scenario not in ['Consumption', 'Emission']:
         errors.append('Invalid Scenario. Must choose between Consumption/Emission')
     if len(budget) != len(optimizer.timeline) or len(target) != len(optimizer.timeline):
         errors.append('Invalid input: inconsistent with time line')
@@ -104,7 +110,9 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
         errors.append('Invalid input: must choose target > 0')
     if delta < 0 or delta > 1:  # discount factor
         errors.append('Invalid input: must choose delta in [0,1]')
-    if penalty < 0:  # penalty rate for consumption/emission
+    if penalty_emission < 0 \
+            or penalty_consumption < 0 \
+            or penalty_flat < 0:
         errors.append('Invalid input: must choose nonnegative penalty')
 
     # Check that Target is Achievable
@@ -112,15 +120,17 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
     target_df = pd.DataFrame({'Target': target, 'Year': optimizer.timeline}
                              ).merge(timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
 
-    if scenario in LOOKUP:
-        lookup = LOOKUP[scenario]
-        if np.isinf(penalty):
+    if optimizer.scenario in LOOKUP:
+        lookup = LOOKUP[optimizer.scenario]
+        if np.isinf(penalty_emission) \
+                or np.isinf(penalty_consumption) \
+                or np.isinf(penalty_flat):
             # Check whether target is achievable
             target = target_df.Target * optimizer.baseline[lookup['optimize']].iloc[0]
             max_reduction = optimizer.df.groupby('Group')[lookup['data']].max().sum()
             ind = getattr(optimizer, lookup['target']) < (optimizer.baseline[lookup['optimize']] - max_reduction)
             if any(ind):
-                errors.append('%s target too low to fulfill. See Violating years for detail' % scenario)
+                errors.append('%s target too low to fulfill. See Violating years for detail' % optimizer.scenario)
                 # return{'status':'error','message':'Consumption target too low to fulfill. See violating_years for
                 # detail','violating_years':pd.DataFrame({'achievable percentage of remaining consumption':1-
                 # max_reduction/self.baseline.Total_Consumption.loc[ind],'target persentage':target_df.loc[ind,
@@ -131,13 +141,12 @@ def pre_validate_parameters(optimizer: Optimizer, budget, target, penalty, delta
     return errors if errors else None
 
 
-def post_validate_parameters(optimizer: Optimizer, scenario):
+def post_validate_parameters(optimizer: Optimizer):
     """
     Check that consumption/emission targets were set sucessfully
     """
-    lookup = LOOKUP[scenario]
+    lookup = LOOKUP[optimizer.scenario]
     errors = []
     if not hasattr(optimizer, lookup['target']):
         errors.append('Must set Target before calling Optimization')
     return errors if errors else None
-
