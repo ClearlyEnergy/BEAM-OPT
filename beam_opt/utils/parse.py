@@ -395,19 +395,20 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
     #         'message': 'The property is missing the following columns, please add %s' % ', '.join(missing_columns)
     #     }
 
-    baseline_elec = state.extra_data.get('Electricity Use - Grid Purchase (kBtu)')
-    baseline_gas = state.extra_data.get('Natural Gas Use (kBtu)')
-    elec_use, gas_use = _baseline_fuels_by_emission_rates(
+    baseline_elec = state.extra_data.get('Electricity Use - Grid Purchase (kBtu)', 0)
+    baseline_gas = state.extra_data.get('Natural Gas Use (kBtu)', 0)
+    elec_mmbtu, gas_mmbtu = _baseline_fuel_mmbtu(timeline, baseline_elec, baseline_gas)
+    elec_co2, gas_co2 = _baseline_fuel_co2(
         emission_rates, timeline, baseline_elec, baseline_gas)
 
     property_baseline_data = [[
         str(property_view_id),                                              # Building
         state.extra_data.get('Annual Savings', 0),                          # Annual_Saving
-        elec_use,                                                           # Electricity CO2 (kbtu) to (kg)
-        gas_use,                                                            # Gas CO2 (kbtu) to (kg)
-        elec_use + gas_use,                                                 # Total sum of above fuels
-        state.extra_data.get('Electricity Savings (kbtu)', 0) / 1000,       # Electricity Savings (mmbtu)
-        state.extra_data.get('Natural Gas Savings (kbtu)', 0) / 1000,       # Gas Savings (mmbtu)
+        elec_co2,                                                           # Elec kgCO2
+        gas_co2,                                                            # Gas kgCO2
+        elec_co2 + gas_co2,                                                 # Total kgCO2
+        elec_mmbtu,                                                         # Elec (mmbtu)
+        gas_mmbtu,                                                          # Gas (mmbtu)
         state.extra_data.get('Electricity Bill Savings', 0),                # Electricity Bill Savings
         state.extra_data.get('Natural Gas Bill Savings', 0),                # Gas Bill Savings
     ]]
@@ -597,7 +598,7 @@ def _worse_scenario(left_scenario, right_scenario):
     return left_scenario if left_savings <= right_savings else right_scenario
 
 
-def _baseline_fuels_by_emission_rates(emission_rates, timeline, baseline_elec, baseline_gas):
+def _baseline_fuel_co2(emission_rates, timeline, baseline_elec, baseline_gas):
     """
     """
     total_years = timeline[-1] - timeline[0] + 1
@@ -616,3 +617,10 @@ def _baseline_fuels_by_emission_rates(emission_rates, timeline, baseline_elec, b
         years_past += period_len
 
     return elec_use, gas_use
+
+
+def _baseline_fuel_mmbtu(timeline, baseline_elec, baseline_gas):
+    total_years = timeline[-1] - timeline[0] + 1
+    elec_mmbtu = np.full(total_years, float(baseline_elec) / 1000)
+    gas_mmbtu = np.full(total_years, float(baseline_gas) / 1000)
+    return elec_mmbtu, gas_mmbtu

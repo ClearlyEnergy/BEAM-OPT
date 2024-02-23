@@ -56,7 +56,9 @@ class Optimizer:
         self.baseline = baseline_df.copy()
 
         # Perform Baseline Preprocessing
-        self.baseline['Total_Consumption'] = self.baseline.Electricity_Consumption + self.baseline.Gas_Consumption
+        elec_consumption = np.array(self.baseline.Electricity_Consumption[0])
+        gas_consumption = np.array(self.baseline.Gas_Consumption[0])
+        self.baseline['Total_Consumption'] = [elec_consumption + gas_consumption]
 
         # This next line should be changed once more data available
         self.baseline['Year'] = timeline[0] + np.arange(0, self.baseline.shape[0])
@@ -84,10 +86,11 @@ class Optimizer:
         self.timeline_df = pd.DataFrame(np.arange(timeline[0], timeline[-1] + 1), columns=['Year'])
 
         FUEL_COLS = [
-            LOOKUP[self.scenario]['electricity'],
-            LOOKUP[self.scenario]['gas'],
+            LOOKUP[self.scenario]['baseline_electricity'],
+            LOOKUP[self.scenario]['baseline_gas'],
             LOOKUP[self.scenario]['optimize'],
         ]
+
         self.baseline = self.baseline.explode(FUEL_COLS).reset_index(drop=True)
         self.baseline['Year'] = self.timeline_df
         self.baseline = self.baseline.set_index('Year')
