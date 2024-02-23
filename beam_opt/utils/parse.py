@@ -343,11 +343,13 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
         elec_co2_list = []
         gas_co2_list = []
         total_co2 = []
+        elec_use = scenario['annual_electricity_energy'] or 0
+        gas_use = scenario['annual_natural_gas_energy'] or 0
         for time in timeline:
             elec_rate = emission_rates['electricity'][time]
             gas_rate = emission_rates['natural_gas'][time]
-            elec_co2 = convert_to_kg(scenario['annual_electricity_energy'], 'mmbtu', elec_rate)
-            gas_co2 = convert_to_kg(scenario['annual_natural_gas_energy'], 'mmbtu', gas_rate)
+            elec_co2 = convert_to_kg(elec_use, 'mmbtu', elec_rate)
+            gas_co2 = convert_to_kg(gas_use, 'mmbtu', gas_rate)
             elec_co2_list.append(elec_co2)
             gas_co2_list.append(gas_co2)
             total_co2.append(elec_co2 + gas_co2)
@@ -362,8 +364,8 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
             elec_co2_list,                                                      # Elec Reduction (kgCO2)
             gas_co2_list,                                                       # Gas Reduction (kgCO2)
             total_co2,                                                          # Total Reduction (kgCO2)
-            [scenario['annual_electricity_energy'] * 1000] * len(timeline),     # Elec Reduction (kbtu)
-            [scenario['annual_natural_gas_energy'] * 1000] * len(timeline),     # Gas Reduction (kbtu)
+            [elec_use * 1000] * len(timeline),                                  # Elec Reduction (kbtu)
+            [gas_use * 1000] * len(timeline),                                   # Gas Reduction (kbtu)
             (scenario['annual_cost_savings'] or 0) / 2,                         # Electricity Bill Savings
             (scenario['annual_cost_savings'] or 0) / 2,                         # Gas Bill Savings
             category_name,                                                      # Measure Category Name
