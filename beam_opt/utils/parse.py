@@ -359,11 +359,11 @@ def parse_beam_measures(property_view_id: int, emission_rates: dict, timeline: l
             cost_total_first,                                                   # Cost
             scenario['annual_cost_savings'],                                    # Annual_Saving
             scenario['name'] if scenario['name'] else 'N/A',                    # Scenario
-            elec_co2_list,                                                      # Electricity CO2 (mmbtu) to (kg)
-            gas_co2_list,                                                       # Gas CO2 (mmbtu) to (kg)
-            total_co2,                                                          # Sum of Fuel Uses CO2 (kg)
-            [scenario['annual_electricity_energy']] * len(timeline),            # Electricity Savings (mmbtu)
-            [scenario['annual_natural_gas_energy']] * len(timeline),            # Gas Savings (mmbtu)
+            elec_co2_list,                                                      # Elec Reduction (kgCO2)
+            gas_co2_list,                                                       # Gas Reduction (kgCO2)
+            total_co2,                                                          # Total Reduction (kgCO2)
+            [scenario['annual_electricity_energy'] * 1000] * len(timeline),     # Elec Reduction (kbtu)
+            [scenario['annual_natural_gas_energy'] * 1000] * len(timeline),     # Gas Reduction (kbtu)
             (scenario['annual_cost_savings'] or 0) / 2,                         # Electricity Bill Savings
             (scenario['annual_cost_savings'] or 0) / 2,                         # Gas Bill Savings
             category_name,                                                      # Measure Category Name
