@@ -98,9 +98,8 @@ class Optimizer:
         # Parameters set by set_parameters func
         self.delta = None
         self.budget = None
-        self.penalty_emission = 0
-        self.penalty_consumption = 0
-        self.penalty_flat = 0
+        self.penalty_usage = 0.0
+        self.penalty_flat = 0.0
         self.selected_df = None
 
         # Parameters set in optimize func
@@ -116,20 +115,16 @@ class Optimizer:
             self,
             budget,
             target,
-            penalty_emission,
-            penalty_consumption,
+            penalty_usage,
             penalty_flat,
             delta):
         self.delta = delta
         self.budget = np.array(budget)
-        self.penalty_emission = penalty_emission
-        self.penalty_consumption = penalty_consumption
+        self.penalty_usage = penalty_usage
         self.penalty_flat = penalty_flat
-
         target_df = pd.DataFrame({'Target': target, 'Year': self.timeline})
         target_df = target_df.merge(self.timeline_df, on='Year', how='right').fillna(method='ffill').set_index('Year')
-        setattr(self, LOOKUP[self.scenario]['target'], target_df.Target * 1000)  # target_df.Target is in mtCO2e, convert to kg
-
+        setattr(self, LOOKUP[self.scenario]['target'], target_df.Target)
         return {'status': 'success', 'message': ''}
 
     def _preselect(self, target_num=15, discard_thres=1e-3):
@@ -427,13 +422,7 @@ class Optimizer:
         :param excess: a numpy array or scalar to which penalties are applied
         :return: a numpy array or scalar of same shape as excess with applied penalties
         """
-        penalty = np.zeros_like(excess)
-        if self.scenario == 'Emission' and self.penalty_emission > 0:
-            penalty += np.where(excess > 0, excess, 0) * self.penalty_emission
-            penalty = penalty / 1000  # assume excess in kgCO2, penalty in mtCO2
-        elif self.scenario == 'Consumption' and self.penalty_consumption > 0:
-            penalty += np.where(excess > 0, excess, 0) * self.penalty_consumption
-
+        penalty = np.where(excess > 0, excess, 0) * self.penalty_usage
         flat_penalty = np.where(excess > 0, self.penalty_flat, 0)
         penalty += flat_penalty
         return penalty
