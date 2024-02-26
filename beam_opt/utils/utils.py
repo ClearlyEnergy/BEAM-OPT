@@ -29,16 +29,21 @@ def dump_optimizer_result(scenarios, levels, path=None):
         f.write(result)
 
 
-def multi_col_explode(df, cols):
+def explode_on_fuels(df, cols):
     """
-    Perform explode on mutliple columns. Same as .explode(['A','B',...]) in newer versions
-    of pandas.
+    Perform explode on the fuel columns.
+    Assumes that df has a single row.
 
     :param pandas.Dataframe df: Dataframe to explode with cols
     :param list(str) cols: Name of columns to explode. Underlying series must
     each be the same length.
     :return: Exploded dataframe.
     """
+    if len(df) != 1:
+        raise ValueError('argument df must be a single row')
+    if len(cols) == 0:
+        return df
+    
 
     exploded_cols = []
     for col in cols:
@@ -47,4 +52,7 @@ def multi_col_explode(df, cols):
             raise ValueError('Cannot explode on columns with different length')
         exploded_cols.append(exploded_col)
 
-    return df.merge(pd.concat(exploded_cols, axis=1), how='cross')
+    n = len(exploded_cols[0]) if len(exploded_cols) > 0 else 1
+    df = pd.concat([df] * n, ignore_index=True)
+    exploded_df = pd.concat(exploded_cols, axis=1)
+    return pd.concat([df, exploded_df], axis=1)
