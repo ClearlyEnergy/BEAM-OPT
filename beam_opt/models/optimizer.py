@@ -13,6 +13,7 @@ import pandas as pd
 import itertools
 
 from beam_opt.models.data_container import CompleteData
+from beam_opt.utils.utils import multi_col_explode
 
 LOGGER = logging.getLogger(__name__)
 ACCEPT_FIRST_SOLUTION = True
@@ -91,7 +92,7 @@ class Optimizer:
             LOOKUP[self.scenario]['optimize'],
         ]
 
-        self.baseline = self.baseline.explode(FUEL_COLS).reset_index(drop=True)
+        self.baseline = multi_col_explode(self.baseline, FUEL_COLS).reset_index(drop=True)
         self.baseline['Year'] = self.timeline_df
         self.baseline = self.baseline.set_index('Year')
 
