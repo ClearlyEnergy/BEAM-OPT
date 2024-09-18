@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["beam_opt"]
+
+[project]
+name = "beam_opt"
+dynamic = ["version"]
+description = "Pythonic Pandoc filters"
+readme = "README.md"
+authors = [{name = "", email = ""}]
+license = {text = "BDS3"}
+requires-python = ">=3.7"
+keywords = ["markdown"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing :: Filters",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy"
+]
+dependencies = [
+    "Django>=2.2,<4",
+    "drf-yasg==1.20.0",
+    "drf-nested-routers==0.91",
+    "requests==2.22.0",
+    "djangorestframework==3.12.2",
+    "pandas==1.1.5",
+    "xlrd==1.2.0"
+]
+
+[project.urls]
+homepage = "https://github.com/ClearlyEnergy/BEAM-OPT"
+
+[project.optional-dependencies]
+dev = [
+    "configparser",
+    "coverage",
+    "flake8",
+    "pandocfilters",
+    "pytest-cov",
+    "pytest",
+    "requests"
+]
+pypi = [
+    "build",
+    "docutils",
+    "Pygments",
+    "twine",
+    "wheel"
+]
+extras = [
+    "yamlloader>=1,<2"
+]
+
+[project.scripts]
+panflute = "panflute:main"
+panfl = "panflute:panfl"
+
+[tool.setuptools.dynamic]
+version = {attr = "panflute.version.__version__"}
