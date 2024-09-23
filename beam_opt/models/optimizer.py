@@ -541,9 +541,20 @@ class Optimizer:
         for i in range(max_iter):
             self._prep()
             if scenario_selection:
-                self.measure_df = measure_df
-                self._calculate_forward_reduction(scenario_selection)
-                self.Xoptimal_ind = np.array(scenario_selection)
+                # self.measure_df = measure_df
+
+                # Convert scenario selection from dict to 2D Array
+                scenario_ids = self.measure_df['Identifier'].to_list()
+                scenario_ids.sort()
+                scenario_selection_2d = []
+                for year_scenarios in scenario_selection.values():
+                    year_selection = []
+                    for id in scenario_ids:
+                        year_selection.append(str(id) in year_scenarios and year_scenarios[str(id)])
+                    scenario_selection_2d.append(year_selection)
+
+                self._calculate_forward_reduction(scenario_selection_2d)
+                self.Xoptimal_ind = np.array(scenario_selection_2d)
                 sol = self._compile_solution(filtered=True)
             else:
                 _, penalties = self._optimize()
