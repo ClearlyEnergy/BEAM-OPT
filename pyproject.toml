@@ -3,10 +3,10 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["beam-opt"]
+packages = ["beam_opt"]
 
 [project]
-name = "beam-opt"
+name = "beam_opt"
 dynamic = ["version"]
 description = ""
 license = {text = "BDS3"}
