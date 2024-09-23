@@ -9,7 +9,7 @@ packages = ["beam_opt"]
 name = "beam_opt"
 dynamic = ["version"]
 description = ""
-license = {text = "BDS3"}
+license = "MIT"
 requires-python = ">=3.7"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
