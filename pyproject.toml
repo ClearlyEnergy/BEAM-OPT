@@ -7,7 +7,7 @@ packages = ["beam_opt"]
 
 [project]
 name = "beam_opt"
-dynamic = ["version"]
+version = "0.0.0"
 description = ""
 license = "MIT"
 requires-python = ">=3.7"
