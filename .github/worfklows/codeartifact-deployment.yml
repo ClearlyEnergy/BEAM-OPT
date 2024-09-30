@@ -37,13 +37,6 @@ jobs:
           RELEASE_VERSION: ${{ needs.semantic-release.outputs.release-version }}
         run: ./yq -i e '.version = "${{ env.RELEASE_VERSION }}"' pyproject.toml
 
-      - name: Push changes to beam_opt repo
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Release ${{ needs.semantic-release.outputs.release-version }} of ${{ github.repository }}"
-          branch: gh-pages
-          repository: ./beam_opt
-
   publish:
     runs-on: ubuntu-latest
     permissions:
