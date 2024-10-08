@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["beam_opt"]
+
+[project]
+name = "beam_opt"
+version = "0.0.0"
+description = ""
+license = "MIT"
+requires-python = ">=3.7"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Operating System :: OS Independent",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy"
+]
+dependencies = [
+    "Django>=2.2,<4",
+    "drf-yasg==1.20.0",
+    "drf-nested-routers==0.91",
+    "requests==2.22.0",
+    "djangorestframework==3.12.2",
+    "pandas==1.1.5",
+    "xlrd==1.2.0"
+]
+
+[project.urls]
+homepage = "https://github.com/ClearlyEnergy/BEAM-OPT"
