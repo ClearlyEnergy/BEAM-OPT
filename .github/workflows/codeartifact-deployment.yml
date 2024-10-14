@@ -41,17 +41,6 @@ jobs:
           key: "project.version"
           value: ${{ env.RELEASE_VERSION }}
 
-  publish:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
       - name: Set Up Python
         uses: actions/setup-python@v5
         with:
