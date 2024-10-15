@@ -56,7 +56,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::870817328084:role/github-oidc-provider-aws
+          role-to-assume: arn:aws:iam::870817328084:role/publish-github-actions
           role-duration-seconds: 3600
 
       - name: Build and Publish
