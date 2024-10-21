@@ -24,22 +24,13 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     needs: semantic-release
     if: needs.semantic-release.outputs.new-release-published == 'true'
     steps:
       - uses: actions/checkout@v4
-      - name: Download yq
-        run: |
-          wget -nv -nc -O yq https://github.com/mikefarah/yq/releases/download/v4.20.2/yq_linux_amd64
-          chmod +x yq
-      - name: Update pyproject.toml version
-        env:
-          RELEASE_VERSION: ${{ needs.semantic-release.outputs.release-version }}
-        uses: ciiiii/toml-editor@1.0.0
-        with:
-          file: "pyproject.toml"
-          key: "project.version"
-          value: ${{ env.RELEASE_VERSION }}
 
       - name: Set Up Python
         uses: actions/setup-python@v5
@@ -50,7 +41,14 @@ jobs:
         run: |
             python -m pip install --upgrade pip
             pip install build
+            pip install toml-cli
             pip install twine
+
+      - name: Update pyproject.toml version
+        env:
+          RELEASE_VERSION: ${{ needs.semantic-release.outputs.release-version }}
+        run: |
+            toml set --toml-path pyproject.toml project.version ${{ env.RELEASE_VERSION }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
