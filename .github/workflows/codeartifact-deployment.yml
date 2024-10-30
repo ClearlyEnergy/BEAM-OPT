@@ -61,6 +61,6 @@ jobs:
         run: |
           export TWINE_USERNAME=aws
           export TWINE_PASSWORD=`aws codeartifact get-authorization-token --domain clearlyenergy --domain-owner 870817328084 --query authorizationToken --output text`
-          export TWINE_REPOSITORY_URL=`aws codeartifact get-repository-endpoint --domain clearlyenergy --domain-owner 870817328084 --repository BEAM-OPT --format pypi --query repositoryEndpoint --output text`
+          export TWINE_REPOSITORY_URL=`aws codeartifact get-repository-endpoint --domain clearlyenergy --domain-owner 870817328084 --repository beam_opt --format pypi --query repositoryEndpoint --output text`
           python3 -m build
           twine upload dist/*
