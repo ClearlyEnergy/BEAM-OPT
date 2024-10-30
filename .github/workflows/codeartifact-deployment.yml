@@ -64,3 +64,4 @@ jobs:
           export TWINE_REPOSITORY_URL=`aws codeartifact get-repository-endpoint --domain clearlyenergy --domain-owner 870817328084 --repository BEAM-OPT --format pypi --query repositoryEndpoint --output text`
           python3 -m build
           twine upload dist/*
+          
