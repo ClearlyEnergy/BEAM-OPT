@@ -2,12 +2,12 @@
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["beam_opt"]
+[tool.setuptools.packages.find]
+include = ["beam_opt*"]
 
 [project]
 name = "beam_opt"
-version = "0.0.0"
+version = "1.0"
 description = ""
 license = {text = "MIT"}
 requires-python = ">=3.7"
